@@ -1,0 +1,295 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  user_id       BigInt    @id @default(autoincrement())
+  full_name     String?   @db.VarChar(255)
+  email         String?   @unique @db.VarChar(255)
+  password_hash String?   @db.Text
+  avatar_url    String?   @db.Text
+  role          String    @default("student") @db.VarChar(50)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  auth_providers UserAuthProvider[]
+  cvs            UserCv[]
+  notifications  Notification[]
+
+  @@map("users")
+}
+
+model UserAuthProvider {
+  auth_provider_id    BigInt    @id @default(autoincrement())
+  user_id             BigInt
+  provider            String    @db.VarChar(50)
+  provider_user_id    String    @db.VarChar(255)
+  provider_email      String?   @db.VarChar(255)
+  provider_name       String?   @db.VarChar(255)
+  provider_avatar_url String?   @db.Text
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  last_login_at       DateTime? @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([provider, provider_user_id])
+  @@map("user_auth_providers")
+}
+
+model UserCv {
+  cv_id          BigInt    @id @default(autoincrement())
+  user_id        BigInt
+  file_name      String?   @db.VarChar(255)
+  file_url       String?   @db.Text
+  extracted_text String?   @db.Text
+  uploaded_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+
+  user      User          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  cv_skills UserCvSkill[]
+  matches   CvJobMatch[]
+
+  @@index([user_id], map: "idx_user_cvs_user_id")
+  @@map("user_cvs")
+}
+
+model Skill {
+  skill_id   Int       @id @default(autoincrement())
+  skill_name String    @unique @db.VarChar(255)
+  category   String?   @db.VarChar(255)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  type       String?   @db.VarChar(100)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  user_cv_skills          UserCvSkill[]
+  job_skills              JobSkill[]
+  job_group_skill_weights JobGroupSkillWeight[]
+
+  @@map("skills")
+}
+
+model UserCvSkill {
+  cv_id      BigInt
+  skill_id   Int
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+
+  cv    UserCv @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
+  skill Skill  @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+
+  @@id([cv_id, skill_id])
+  @@index([skill_id], map: "idx_user_cv_skills_skill_id")
+  @@map("user_cv_skills")
+}
+
+model Company {
+  company_id       BigInt    @id
+  name             String    @db.VarChar(255)
+  description      String?   @db.Text
+  company_size_min Int?
+  company_size_max Int?
+  country          String?   @db.VarChar(100)
+  city             String?   @db.VarChar(100)
+  address          String?   @db.Text
+  url              String?   @db.VarChar(500)
+  industry         String?   @db.VarChar(255)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+
+  jobs               Job[]
+  company_industries CompanyIndustry[]
+
+  @@map("companies")
+}
+
+model Industry {
+  industry_id   Int    @id @default(autoincrement())
+  industry_name String @unique @db.VarChar(255)
+
+  company_industries CompanyIndustry[]
+
+  @@map("industries")
+}
+
+model CompanyIndustry {
+  company_id  BigInt
+  industry_id Int
+
+  company  Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  industry Industry @relation(fields: [industry_id], references: [industry_id], onDelete: Cascade)
+
+  @@id([company_id, industry_id])
+  @@map("company_industries")
+}
+
+model Job {
+  job_id                     BigInt    @id @default(autoincrement())
+  company_id                 BigInt?
+  title                      String    @db.VarChar(500)
+  skills_desc                String?   @db.Text
+  description                String?   @db.Text
+  formatted_experience_level String?   @db.VarChar(100)
+  work_type                  String?   @db.VarChar(100)
+  location                   String?   @db.VarChar(255)
+  is_remote                  Boolean?  @default(false)
+  listed_time                DateTime? @db.Timestamptz(6)
+  expiry_time                DateTime? @db.Timestamptz(6)
+  job_posting_url            String?   @db.Text
+  scraped_at                 DateTime? @default(now()) @db.Timestamp(6)
+  applies                    Int?      @default(0)
+  views                      Int?      @default(0)
+  fingerprint                String?   @unique @db.VarChar(32)
+  job_category               String?   @db.VarChar(100)
+  search_group               String?   @db.VarChar(100)
+  source_name                String?   @db.VarChar(50)
+  source_id                  String?   @db.VarChar(255)
+  updated_at                 DateTime? @default(now()) @db.Timestamp(6)
+
+  company      Company?     @relation(fields: [company_id], references: [company_id], onDelete: SetNull)
+  salaries     Salary[]
+  job_skills   JobSkill[]
+  job_benefits JobBenefit[]
+  cv_matches   CvJobMatch[]
+
+  @@index([company_id], map: "idx_jobs_company_id")
+  @@index([formatted_experience_level], map: "idx_jobs_experience")
+  @@index([expiry_time], map: "idx_jobs_expiry_time")
+  @@index([job_category], map: "idx_jobs_job_category")
+  @@index([listed_time], map: "idx_jobs_listed_time")
+  @@index([search_group], map: "idx_jobs_search_group")
+  @@index([source_name], map: "idx_jobs_source_name")
+  @@index([title], map: "idx_jobs_title")
+  @@map("jobs")
+}
+
+model Salary {
+  salary_id  Int      @id @default(autoincrement())
+  job_id     BigInt?
+  min_salary Decimal? @db.Decimal(18, 2)
+  max_salary Decimal? @db.Decimal(18, 2)
+  med_salary Decimal? @db.Decimal(18, 2)
+  currency   String?  @default("VND") @db.VarChar(10)
+  pay_period String?  @db.VarChar(20)
+
+  job Job? @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+
+  @@index([job_id], map: "idx_salaries_job_id")
+  @@map("salaries")
+}
+
+model JobSkill {
+  job_id      BigInt
+  skill_id    Int
+  is_inferred Boolean? @default(false)
+
+  job   Job   @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  skill Skill @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+
+  @@id([job_id, skill_id])
+  @@map("job_skills")
+}
+
+model Benefit {
+  benefit_id   Int       @id @default(autoincrement())
+  benefit_name String    @unique @db.VarChar(255)
+  category     String?   @db.VarChar(100)
+  created_at   DateTime? @default(now()) @db.Timestamp(6)
+
+  job_benefits JobBenefit[]
+
+  @@map("benefits")
+}
+
+model JobBenefit {
+  job_id      BigInt
+  benefit_id  Int
+  is_inferred Boolean? @default(false)
+
+  job     Job     @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  benefit Benefit @relation(fields: [benefit_id], references: [benefit_id], onDelete: Cascade)
+
+  @@id([job_id, benefit_id])
+  @@map("job_benefits")
+}
+
+model JobGroupSkillWeight {
+  search_group String  @db.VarChar(100)
+  skill_id     Int
+  weight_wi    Decimal @db.Decimal(8, 4)
+
+  skill Skill @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+
+  @@id([search_group, skill_id])
+  @@map("job_group_skill_weights")
+}
+
+model CvJobMatch {
+  match_id      BigInt    @id @default(autoincrement())
+  cv_id         BigInt
+  match_type    String    @db.VarChar(50)
+  search_group  String?   @db.VarChar(100)
+  job_id        BigInt?
+  match_score   Decimal?  @db.Decimal(5, 2)
+  radar_data    Json?
+  gap_report    Json?
+  model_version String?   @db.VarChar(100)
+  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  updated_at    DateTime? @default(now()) @db.Timestamp(6)
+
+  cv  UserCv @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
+  job Job?   @relation(fields: [job_id], references: [job_id], onDelete: SetNull)
+
+  @@index([created_at], map: "idx_cv_job_matches_created_at")
+  @@index([cv_id], map: "idx_cv_job_matches_cv_id")
+  @@index([job_id], map: "idx_cv_job_matches_job_id")
+  @@index([match_type], map: "idx_cv_job_matches_match_type")
+  @@index([search_group], map: "idx_cv_job_matches_search_group")
+  @@map("cv_job_matches")
+}
+
+model NotificationTemplate {
+  template_id         BigInt   @id @default(autoincrement())
+  template_code       String   @unique @db.VarChar(100)
+  channel             String   @default("in_app") @db.VarChar(30)
+  type                String   @default("system") @db.VarChar(50)
+  priority            String   @default("normal") @db.VarChar(20)
+  title_template      String   @db.VarChar(255)
+  message_template    String   @db.Text
+  action_url_template String?  @db.Text
+  metadata_schema     Json     @default("{}")
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now()) @db.Timestamp(6)
+  updated_at          DateTime @default(now()) @db.Timestamp(6)
+
+  @@index([is_active], map: "idx_notification_templates_active")
+  @@map("notification_templates")
+}
+
+model Notification {
+  notification_id BigInt    @id @default(autoincrement())
+  user_id         BigInt
+  type            String    @default("system") @db.VarChar(50)
+  title           String    @db.VarChar(255)
+  message         String    @db.Text
+  action_url      String?   @db.Text
+  entity_type     String?   @db.VarChar(50)
+  entity_id       BigInt?
+  status          String    @default("unread") @db.VarChar(20)
+  priority        String    @default("normal") @db.VarChar(20)
+  is_read         Boolean   @default(false)
+  read_at         DateTime? @db.Timestamp(6)
+  metadata        Json      @default("{}")
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @default(now()) @db.Timestamp(6)
+
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([entity_type, entity_id], map: "idx_notifications_entity")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_notifications_user_created_at")
+  @@index([user_id, is_read], map: "idx_notifications_user_is_read")
+  @@index([user_id, status], map: "idx_notifications_user_status")
+  @@map("notifications")
+}
