@@ -8,7 +8,7 @@ datasource db {
 }
 
 model User {
-  user_id       BigInt    @id @default(autoincrement())
+  user_id       String    @id @default(uuid()) @db.Uuid
   full_name     String?   @db.VarChar(255)
   email         String?   @unique @db.VarChar(255)
   password_hash String?   @db.Text
@@ -25,8 +25,8 @@ model User {
 }
 
 model UserAuthProvider {
-  auth_provider_id    BigInt    @id @default(autoincrement())
-  user_id             BigInt
+  auth_provider_id    String    @id @default(uuid()) @db.Uuid
+  user_id             String    @db.Uuid
   provider            String    @db.VarChar(50)
   provider_user_id    String    @db.VarChar(255)
   provider_email      String?   @db.VarChar(255)
@@ -42,8 +42,8 @@ model UserAuthProvider {
 }
 
 model UserCv {
-  cv_id          BigInt    @id @default(autoincrement())
-  user_id        BigInt
+  cv_id          String    @id @default(uuid()) @db.Uuid
+  user_id        String    @db.Uuid
   file_name      String?   @db.VarChar(255)
   file_url       String?   @db.Text
   extracted_text String?   @db.Text
@@ -74,7 +74,7 @@ model Skill {
 }
 
 model UserCvSkill {
-  cv_id      BigInt
+  cv_id      String    @db.Uuid
   skill_id   Int
   created_at DateTime? @default(now()) @db.Timestamp(6)
 
@@ -227,8 +227,8 @@ model JobGroupSkillWeight {
 }
 
 model CvJobMatch {
-  match_id      BigInt    @id @default(autoincrement())
-  cv_id         BigInt
+  match_id      String    @id @default(uuid()) @db.Uuid
+  cv_id         String    @db.Uuid
   match_type    String    @db.VarChar(50)
   search_group  String?   @db.VarChar(100)
   job_id        BigInt?
@@ -251,7 +251,7 @@ model CvJobMatch {
 }
 
 model NotificationTemplate {
-  template_id         BigInt   @id @default(autoincrement())
+  template_id         String   @id @default(uuid()) @db.Uuid
   template_code       String   @unique @db.VarChar(100)
   channel             String   @default("in_app") @db.VarChar(30)
   type                String   @default("system") @db.VarChar(50)
@@ -269,14 +269,14 @@ model NotificationTemplate {
 }
 
 model Notification {
-  notification_id BigInt    @id @default(autoincrement())
-  user_id         BigInt
+  notification_id String    @id @default(uuid()) @db.Uuid
+  user_id         String    @db.Uuid
   type            String    @default("system") @db.VarChar(50)
   title           String    @db.VarChar(255)
   message         String    @db.Text
   action_url      String?   @db.Text
   entity_type     String?   @db.VarChar(50)
-  entity_id       BigInt?
+  entity_id       String?
   status          String    @default("unread") @db.VarChar(20)
   priority        String    @default("normal") @db.VarChar(20)
   is_read         Boolean   @default(false)
