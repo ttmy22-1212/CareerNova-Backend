@@ -6,6 +6,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
@@ -24,6 +25,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
   private googleClient: OAuth2Client;
 
   constructor(
@@ -42,6 +44,7 @@ export class AuthService {
   async register(
     dto: RegisterDto,
   ): Promise<IBaseResponse<RegisterResponseDto>> {
+    this.logger.log(`Attempting to register user: ${dto.email}`);
     const { full_name, email, password } = dto;
 
     // Check users.email exists
@@ -50,6 +53,7 @@ export class AuthService {
     });
 
     if (existingUser) {
+      this.logger.warn(`Registration failed: Email ${email} already exists`);
       // 409
       throw new ConflictException('AUTH_EMAIL_EXISTS');
     }
@@ -88,6 +92,9 @@ export class AuthService {
         return user;
       });
 
+      this.logger.log(
+        `User created successfully: ${newUser.user_id}. Sending verification email...`,
+      );
       await this.mailService.sendVerificationEmail(email, verify_token);
 
       return {
@@ -98,6 +105,10 @@ export class AuthService {
         },
       };
     } catch (error) {
+      this.logger.error(
+        `Error during registration for ${email}: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
       if (error instanceof HttpException) {
         throw error;
       }
@@ -107,15 +118,20 @@ export class AuthService {
   }
 
   async verifyEmail(token: string): Promise<IBaseResponse<null>> {
+    this.logger.log(`Verifying email with token: ${token}`);
     const user = await this.prisma.user.findFirst({
       where: { verify_token: token },
     });
 
     if (!user) {
+      this.logger.warn(`Verification failed: Invalid token ${token}`);
       throw new ConflictException('AUTH_INVALID_VERIFY_TOKEN');
     }
 
     if (user.verify_token_expires && new Date() > user.verify_token_expires) {
+      this.logger.warn(
+        `Verification failed: Token expired for user ${user.user_id}`,
+      );
       throw new ConflictException('AUTH_VERIFY_TOKEN_EXPIRED');
     }
 
@@ -128,12 +144,14 @@ export class AuthService {
       },
     });
 
+    this.logger.log(`Email verified successfully for user: ${user.user_id}`);
     return {
       message: 'Xác thực tài khoản thành công',
     };
   }
 
   async login(dto: LoginDto): Promise<IBaseResponse<LoginResponseDto>> {
+    this.logger.log(`Login attempt: ${dto.email}`);
     const { email, password } = dto;
 
     const user = await this.prisma.user.findUnique({
@@ -145,11 +163,13 @@ export class AuthService {
 
     // Not found
     if (!user) {
+      this.logger.warn(`Login failed: Account not found for ${email}`);
       throw new NotFoundException('AUTH_ACCOUNT_NOT_FOUND');
     }
 
     // Check active
     if (!user.is_active) {
+      this.logger.warn(`Login failed: Account ${email} is not active`);
       throw new UnauthorizedException('AUTH_ACCOUNT_NOT_ACTIVE');
     }
 
@@ -157,6 +177,7 @@ export class AuthService {
     const isPasswordValid = await bcrypt.compare(password, user.password_hash!);
 
     if (!isPasswordValid) {
+      this.logger.warn(`Login failed: Invalid credentials for ${email}`);
       throw new UnauthorizedException('AUTH_INVALID_CREDENTIALS');
     }
 
@@ -174,6 +195,7 @@ export class AuthService {
     // Generate tokens
     const tokens = await this.generateTokens(user);
 
+    this.logger.log(`Login successful for user: ${user.user_id}`);
     return {
       message: 'LOGIN_SUCCESS',
       data: {
@@ -186,6 +208,7 @@ export class AuthService {
   }
 
   getGoogleAuthUrl() {
+    this.logger.log('Generating Google Auth URL');
     const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
     const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI');
 
@@ -202,6 +225,7 @@ export class AuthService {
   }
 
   async googleLogin(code: string): Promise<IBaseResponse<any>> {
+    this.logger.log('Processing Google Login');
     try {
       // exchange code -> tokens
       const { tokens } = await this.googleClient.getToken(code);
@@ -209,6 +233,7 @@ export class AuthService {
       const idToken = tokens.id_token;
 
       if (!idToken) {
+        this.logger.error('Google login failed: No ID Token returned');
         throw new BadRequestException('AUTH_GOOGLE_NO_ID_TOKEN');
       }
 
@@ -221,6 +246,7 @@ export class AuthService {
       const payload = ticket.getPayload();
 
       if (!payload) {
+        this.logger.error('Google login failed: Invalid payload');
         throw new BadRequestException('AUTH_GOOGLE_INVALID_TOKEN');
       }
 
@@ -229,6 +255,10 @@ export class AuthService {
       const provider_user_id = payload.sub;
       const provider_email = payload.email!;
       const full_name = payload.name;
+
+      this.logger.log(
+        `Google user identified: ${provider_email} (${provider_user_id})`,
+      );
 
       // check existing provider login
       const existingProvider = await this.prisma.userAuthProvider.findFirst({
@@ -244,14 +274,23 @@ export class AuthService {
       let user: User;
 
       if (existingProvider) {
+        this.logger.log(
+          `Existing Google provider found for user: ${existingProvider.user_id}`,
+        );
         user = existingProvider.user;
       } else {
+        this.logger.log(
+          `No existing Google provider found. Processing social login flow for ${provider_email}`,
+        );
         user = await this.prisma.$transaction(async (tx) => {
           let existingUser = await tx.user.findUnique({
             where: { email: provider_email },
           });
 
           if (!existingUser) {
+            this.logger.log(
+              `Creating new user for Google login: ${provider_email}`,
+            );
             existingUser = await tx.user.create({
               data: {
                 full_name: full_name || provider_email.split('@')[0],
@@ -290,6 +329,7 @@ export class AuthService {
       // generate JWT
       const tokensResult = await this.generateTokens(user);
 
+      this.logger.log(`Google login successful for user: ${user.user_id}`);
       return {
         message: 'LOGIN_SUCCESS',
         data: {
@@ -300,6 +340,10 @@ export class AuthService {
         },
       };
     } catch (error) {
+      this.logger.error(
+        `Google login error: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
       console.error(error);
       throw new InternalServerErrorException('AUTH_GOOGLE_LOGIN_FAILED');
     }
@@ -380,6 +424,9 @@ export class AuthService {
     provider_email: string;
     full_name?: string;
   }): Promise<IBaseResponse<any>> {
+    this.logger.log(
+      `Processing social login flow for ${dto.provider}: ${dto.provider_email}`,
+    );
     const { provider, provider_user_id, provider_email, full_name } = dto;
 
     const existingProvider = await this.prisma.userAuthProvider.findFirst({
@@ -395,14 +442,19 @@ export class AuthService {
     let user: User;
 
     if (existingProvider) {
+      this.logger.log(
+        `Existing social provider found: ${provider} for user ${existingProvider.user_id}`,
+      );
       user = existingProvider.user;
     } else {
+      this.logger.log(`Creating/Linking user for social provider: ${provider}`);
       user = await this.prisma.$transaction(async (tx) => {
         let existingUser = await tx.user.findUnique({
           where: { email: provider_email },
         });
 
         if (!existingUser) {
+          this.logger.log(`Creating new user account for ${provider_email}`);
           existingUser = await tx.user.create({
             data: {
               full_name: full_name || provider_email.split('@')[0],
@@ -441,6 +493,7 @@ export class AuthService {
     // generate JWT
     const tokens = await this.generateTokens(user);
 
+    this.logger.log(`Social login successful for user: ${user.user_id}`);
     return {
       message: 'LOGIN_SUCCESS',
       data: {
@@ -452,6 +505,7 @@ export class AuthService {
   }
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<IBaseResponse<null>> {
+    this.logger.log(`Forgot password request for: ${dto.email}`);
     const { email } = dto;
 
     const user = await this.prisma.user.findUnique({
@@ -459,6 +513,9 @@ export class AuthService {
     });
 
     if (user) {
+      this.logger.log(
+        `User found for forgot password: ${user.user_id}. Generating reset token.`,
+      );
       const resetToken = crypto.randomBytes(32).toString('hex');
       const expires = new Date();
       expires.setHours(expires.getHours() + 1);
@@ -472,6 +529,10 @@ export class AuthService {
       });
 
       await this.mailService.sendPasswordResetEmail(email, resetToken);
+    } else {
+      this.logger.warn(
+        `Forgot password request: Email ${email} not found in system (security: returning generic success)`,
+      );
     }
 
     return {
@@ -481,6 +542,7 @@ export class AuthService {
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<IBaseResponse<null>> {
+    this.logger.log(`Attempting to reset password with token: ${dto.token}`);
     const { token, newPassword } = dto;
 
     const user = await this.prisma.user.findFirst({
@@ -491,6 +553,9 @@ export class AuthService {
     });
 
     if (!user) {
+      this.logger.warn(
+        `Reset password failed: Invalid or expired token ${token}`,
+      );
       throw new BadRequestException(
         'Mã xác nhận không hợp lệ hoặc đã hết hạn.',
       );
@@ -508,12 +573,14 @@ export class AuthService {
       },
     });
 
+    this.logger.log(`Password reset successful for user: ${user.user_id}`);
     return {
       message: 'Mật khẩu của bạn đã được cập nhật thành công.',
     };
   }
 
   private async generateTokens(user: User): Promise<IAuthResult> {
+    this.logger.debug(`Generating JWT tokens for user: ${user.user_id}`);
     const payload: JwtPayload = {
       sub: user.user_id,
       email: user.email!,

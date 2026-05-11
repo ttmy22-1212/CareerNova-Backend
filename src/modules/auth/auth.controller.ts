@@ -2,8 +2,6 @@ import { Body, Controller, Post, HttpStatus, Get, Query } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto, RegisterResponseDto } from './dto/register.dto';
-import { AuthResponseDto } from './dto/auth-response.dto';
-import { IAuthResult } from './interfaces/auth.interface';
 import { IBaseResponse } from '../../common/interfaces/response.interface';
 import { LoginDto, LoginResponseDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
