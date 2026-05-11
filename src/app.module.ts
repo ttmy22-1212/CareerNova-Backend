@@ -6,6 +6,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { EmailModule } from './email/email.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { JobModule } from './modules/job/job.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { ProfileModule } from './modules/profile/profile.module';
     EmailModule,
     AuthModule,
     ProfileModule,
+    JobModule,
   ],
   controllers: [AppController],
   providers: [AppService],
