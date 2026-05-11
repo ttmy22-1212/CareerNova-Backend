@@ -16,6 +16,9 @@ model User {
   role          String    @default("student") @db.VarChar(50)
   created_at    DateTime? @default(now()) @db.Timestamp(6)
   updated_at    DateTime? @default(now()) @db.Timestamp(6)
+  is_active     Boolean   @default(false)
+  verify_token  String?   @db.Text
+  verify_token_expires DateTime? @db.Timestamp(6)
 
   auth_providers UserAuthProvider[]
   cvs            UserCv[]
