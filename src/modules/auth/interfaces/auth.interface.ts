@@ -8,6 +8,10 @@ export interface JwtPayload {
   exp?: number;
 }
 
+export interface OptionalAuthenticatedRequest extends Request {
+  user?: JwtPayload;
+}
+
 export interface AuthenticatedRequest extends Request {
   user: JwtPayload;
 }

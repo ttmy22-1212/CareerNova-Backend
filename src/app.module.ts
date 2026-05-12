@@ -8,6 +8,8 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { JobModule } from './modules/job/job.module';
 import { CvModule } from './modules/cv/cv.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { SalaryInsightsModule } from './modules/salary-insights/salary-insights.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { CvModule } from './modules/cv/cv.module';
     ProfileModule,
     JobModule,
     CvModule,
+    DashboardModule,
+    SalaryInsightsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
