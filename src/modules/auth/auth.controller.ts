@@ -1,4 +1,12 @@
-import { Body, Controller, Post, HttpStatus, Get, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Post,
+  HttpStatus,
+  Get,
+  Query,
+  HttpCode,
+} from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto, RegisterResponseDto } from './dto/register.dto';
@@ -6,6 +14,7 @@ import { IBaseResponse } from '../../common/interfaces/response.interface';
 import { LoginDto, LoginResponseDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -114,5 +123,11 @@ export class AuthController {
   })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  async refreshToken(@Body() dto: RefreshTokenDto) {
+    return this.authService.refreshToken(dto.refresh_token);
   }
 }

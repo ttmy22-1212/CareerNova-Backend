@@ -19,10 +19,18 @@ model User {
   is_active     Boolean   @default(false)
   verify_token  String?   @db.Text
   verify_token_expires DateTime? @db.Timestamp(6)
+  school        String?   @db.VarChar(255)
+  major         String?   @db.VarChar(255)
+  current_year  Int?
+  orientation   String?   @db.VarChar(255)
+  objective     String?   @db.VarChar(255)
+  current_step        Int       @default(1)
+  onboarding_completed Boolean   @default(false)
 
   auth_providers UserAuthProvider[]
   cvs            UserCv[]
   notifications  Notification[]
+  saved_jobs     SavedJob[]
 
   @@map("users")
 }
@@ -156,6 +164,7 @@ model Job {
   job_skills   JobSkill[]
   job_benefits JobBenefit[]
   cv_matches   CvJobMatch[]
+  saved_by     SavedJob[]
 
   @@index([company_id], map: "idx_jobs_company_id")
   @@index([formatted_experience_level], map: "idx_jobs_experience")
@@ -295,4 +304,19 @@ model Notification {
   @@index([user_id, is_read], map: "idx_notifications_user_is_read")
   @@index([user_id, status], map: "idx_notifications_user_status")
   @@map("notifications")
+}
+
+model SavedJob {
+  saved_job_id String   @id @default(uuid()) @db.Uuid
+  user_id      String   @db.Uuid
+  job_id       BigInt
+
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+
+  user         User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  job          Job      @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+
+  @@unique([user_id, job_id])
+  @@index([user_id], map: "idx_saved_jobs_user_id")
+  @@map("saved_jobs")
 }

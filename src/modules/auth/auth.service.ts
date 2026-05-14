@@ -22,6 +22,7 @@ import { JwtPayload, IAuthResult } from './interfaces/auth.interface';
 import { LoginDto, LoginResponseDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { RefreshTokenResponseDto } from './dto/refresh-token.dto';
 
 @Injectable()
 export class AuthService {
@@ -577,6 +578,52 @@ export class AuthService {
     return {
       message: 'Mật khẩu của bạn đã được cập nhật thành công.',
     };
+  }
+
+  async refreshToken(
+    refreshToken: string,
+  ): Promise<IBaseResponse<RefreshTokenResponseDto>> {
+    this.logger.log('Refreshing access token');
+
+    try {
+      const payload =
+        await this.jwtService.verifyAsync<JwtPayload>(refreshToken);
+
+      const user = await this.prisma.user.findUnique({
+        where: {
+          user_id: payload.sub,
+        },
+      });
+
+      if (!user) {
+        this.logger.warn(`Refresh token failed: User ${payload.sub} not found`);
+        throw new UnauthorizedException('AUTH_INVALID_REFRESH_TOKEN');
+      }
+
+      if (!user.is_active) {
+        this.logger.warn(`Refresh token failed: User ${payload.sub} inactive`);
+        throw new UnauthorizedException('AUTH_ACCOUNT_NOT_ACTIVE');
+      }
+
+      const tokens = await this.generateTokens(user);
+
+      this.logger.log(`Refresh token success for user: ${user.user_id}`);
+
+      return {
+        message: 'REFRESH_TOKEN_SUCCESS',
+        data: {
+          access_token: tokens.access_token,
+          refresh_token: tokens.refresh_token,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `Refresh token error: ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+
+      throw new UnauthorizedException('AUTH_INVALID_REFRESH_TOKEN');
+    }
   }
 
   private async generateTokens(user: User): Promise<IAuthResult> {
