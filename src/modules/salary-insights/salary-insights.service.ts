@@ -6,14 +6,9 @@ import {
   SalaryByRoleDto,
   SalaryByLocationDto,
   SalaryBySkillDto,
+  SalaryFilterDto,
+  SalaryTrendDto,
 } from './dto/salary-insights.dto';
-
-interface GroupByResult {
-  title?: string;
-  location?: string;
-  skill_id?: number;
-  _count: { job_id: number };
-}
 
 @Injectable()
 export class SalaryInsightsService {
@@ -21,35 +16,82 @@ export class SalaryInsightsService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async getSummary(): Promise<SalarySummaryDto> {
+  async getSummary(filters: SalaryFilterDto): Promise<SalarySummaryDto> {
     try {
-      this.logger.log('Fetching salary summary...');
+      this.logger.log(
+        `Fetching salary summary with filters: ${JSON.stringify(filters)}`,
+      );
+      const jobWhereInput = this.buildWhereCondition(filters);
+
+      const now = new Date();
+      const currentYear = now.getFullYear(); // 2026
+
       const aggregate = await this.prisma.salary.aggregate({
+        where: { job: jobWhereInput },
         _avg: { med_salary: true },
       });
 
       const openJobsCount = await this.prisma.job.count({
         where: {
-          OR: [{ expiry_time: { gte: new Date() } }, { expiry_time: null }],
+          ...jobWhereInput,
+          OR: [{ expiry_time: { gte: now } }, { expiry_time: null }],
         },
       });
 
       const allSalaries = await this.prisma.salary.findMany({
+        where: { job: jobWhereInput },
         select: { med_salary: true },
         orderBy: { med_salary: 'asc' },
       });
-
       const salaries = allSalaries.map((s) => Number(s.med_salary || 0));
+
+      const avgSalaryThisYear = await this.prisma.salary.aggregate({
+        where: {
+          job: {
+            ...jobWhereInput,
+            listed_time: {
+              gte: new Date(`${currentYear}-01-01`),
+              lte: new Date(`${currentYear}-12-31`),
+            },
+          },
+        },
+        _avg: { med_salary: true },
+      });
+
+      const avgSalaryLastYear = await this.prisma.salary.aggregate({
+        where: {
+          job: {
+            ...jobWhereInput,
+            listed_time: {
+              gte: new Date(`${currentYear - 1}-01-01`),
+              lte: new Date(`${currentYear - 1}-12-31`),
+            },
+          },
+        },
+        _avg: { med_salary: true },
+      });
+
+      const thisYearAvg = Number(
+        avgSalaryThisYear._avg?.med_salary || aggregate._avg?.med_salary || 0,
+      );
+      const lastYearAvg = Number(avgSalaryLastYear._avg?.med_salary || 0);
+
+      let growthPercentage = 0;
+      if (lastYearAvg > 0) {
+        growthPercentage = ((thisYearAvg - lastYearAvg) / lastYearAvg) * 100;
+      } else {
+        growthPercentage = 0;
+      }
+
       const result = {
         average_salary: Math.round(Number(aggregate._avg?.med_salary || 0)),
         median_salary: this.calculatePercentile(salaries, 0.5),
         percentile_75: this.calculatePercentile(salaries, 0.75),
         open_jobs_count: openJobsCount,
+        salary_growth_percentage: Number(growthPercentage.toFixed(1)),
       };
 
-      this.logger.log(
-        `Summary fetched: avg=${result.average_salary}, jobs=${result.open_jobs_count}`,
-      );
+      this.logger.log(`Summary fetched successfully with growth profile.`);
       return result;
     } catch (error: unknown) {
       this.handleError(error, 'Summary');
@@ -57,37 +99,44 @@ export class SalaryInsightsService {
     }
   }
 
-  async getByRole(): Promise<SalaryByRoleDto[]> {
+  async getByRole(filters: SalaryFilterDto): Promise<SalaryByRoleDto[]> {
     try {
-      this.logger.log('Fetching salary by role...');
-      const roles = (await this.prisma.job.groupBy({
-        by: ['title'] as Prisma.JobScalarFieldEnum[],
-        _count: { job_id: true },
-        where: { title: { not: '' } },
-      })) as unknown as GroupByResult[];
+      this.logger.log(
+        `Fetching salary by role with filters: ${JSON.stringify(filters)}`,
+      );
+      const jobWhereInput = this.buildWhereCondition(filters);
 
-      this.logger.log(`Found ${roles.length} roles to process`);
+      // job_category
+      const categories = await this.prisma.job.groupBy({
+        by: ['job_category'],
+        _count: { job_id: true },
+        where: {
+          ...jobWhereInput,
+          AND: [{ job_category: { not: null } }, { job_category: { not: '' } }],
+        },
+        orderBy: { _count: { job_id: 'desc' } },
+        take: 6, // top 6
+      });
 
       const results = await Promise.all(
-        roles.map(async (r) => {
+        categories.map(async (c) => {
           const stats = await this.prisma.salary.aggregate({
-            where: { job: { title: r.title } },
+            where: { job: { ...jobWhereInput, job_category: c.job_category } },
             _min: { min_salary: true },
             _max: { max_salary: true },
             _avg: { med_salary: true },
           });
 
           return {
-            role: r.title || 'N/A',
-            min_salary: Number(stats._min?.min_salary || 0),
+            role: c.job_category || 'N/A',
+            min_salary: Math.round(Number(stats._min?.min_salary || 0)),
             avg_salary: Math.round(Number(stats._avg?.med_salary || 0)),
-            max_salary: Number(stats._max?.max_salary || 0),
-            sample_count: r._count.job_id,
+            max_salary: Math.round(Number(stats._max?.max_salary || 0)),
+            sample_count: c._count.job_id, // Khớp với sample_count trong DTO
           };
         }),
       );
 
-      this.logger.log(`Successfully processed ${results.length} roles`);
       return results;
     } catch (error: unknown) {
       this.handleError(error, 'By Role');
@@ -95,21 +144,31 @@ export class SalaryInsightsService {
     }
   }
 
-  async getByLocation(): Promise<SalaryByLocationDto[]> {
+  // 2. HÀM LẤY LƯƠNG THEO NƠI LÀM VIỆC (Biểu đồ ngang) -> Trả về SalaryByLocationDto[]
+  async getByLocation(
+    filters: SalaryFilterDto,
+  ): Promise<SalaryByLocationDto[]> {
     try {
-      this.logger.log('Fetching salary by location...');
-      const locations = (await this.prisma.job.groupBy({
-        by: ['location'] as Prisma.JobScalarFieldEnum[],
-        _count: { job_id: true },
-        where: { location: { not: null } },
-      })) as unknown as GroupByResult[];
+      this.logger.log(
+        `Fetching salary by location with filters: ${JSON.stringify(filters)}`,
+      );
+      const jobWhereInput = this.buildWhereCondition(filters);
 
-      this.logger.log(`Found ${locations.length} locations to process`);
+      const locations = await this.prisma.job.groupBy({
+        by: ['location'],
+        _count: { job_id: true },
+        where: {
+          ...jobWhereInput,
+          AND: [{ location: { not: null } }, { location: { not: '' } }],
+        },
+        orderBy: { _count: { job_id: 'desc' } },
+        take: 10, // Lấy top 10 thành phố lương cao/nhiều job nhất
+      });
 
       const results = await Promise.all(
         locations.map(async (l) => {
           const stats = await this.prisma.salary.aggregate({
-            where: { job: { location: l.location } },
+            where: { job: { ...jobWhereInput, location: l.location } },
             _avg: { med_salary: true },
           });
 
@@ -121,7 +180,6 @@ export class SalaryInsightsService {
         }),
       );
 
-      this.logger.log(`Successfully processed ${results.length} locations`);
       return results;
     } catch (error: unknown) {
       this.handleError(error, 'By Location');
@@ -129,15 +187,22 @@ export class SalaryInsightsService {
     }
   }
 
-  async getBySkill(): Promise<SalaryBySkillDto[]> {
+  // 3. HÀM LẤY LƯƠNG THEO KỸ NĂNG (Biểu đồ hái ra tiền) -> Trả về SalaryBySkillDto[]
+  async getBySkill(filters: SalaryFilterDto): Promise<SalaryBySkillDto[]> {
     try {
-      this.logger.log('Fetching salary by skill...');
-      const skillsStats = (await this.prisma.jobSkill.groupBy({
-        by: ['skill_id'] as Prisma.JobSkillScalarFieldEnum[],
-        _count: { job_id: true },
-      })) as unknown as GroupByResult[];
+      this.logger.log(
+        `Fetching salary by skill with filters: ${JSON.stringify(filters)}`,
+      );
+      const jobWhereInput = this.buildWhereCondition(filters);
 
-      this.logger.log(`Found ${skillsStats.length} skills to process`);
+      // Tìm kiếm các skill xuất hiện nhiều nhất trong các Job đã lọc ứng với điều kiện UI
+      const skillsStats = await this.prisma.jobSkill.groupBy({
+        by: ['skill_id'],
+        _count: { job_id: true },
+        where: { job: jobWhereInput },
+        orderBy: { _count: { job_id: 'desc' } },
+        take: 6,
+      });
 
       const results = await Promise.all(
         skillsStats.map(async (s) => {
@@ -146,12 +211,17 @@ export class SalaryInsightsService {
           });
 
           const salaryStats = await this.prisma.salary.aggregate({
-            where: { job: { job_skills: { some: { skill_id: s.skill_id } } } },
+            where: {
+              job: {
+                ...jobWhereInput,
+                job_skills: { some: { skill_id: s.skill_id } },
+              },
+            },
             _avg: { med_salary: true },
           });
 
           return {
-            skill_id: s.skill_id || 0,
+            skill_id: s.skill_id,
             skill_name: skillInfo?.skill_name || 'Unknown',
             avg_salary: Math.round(Number(salaryStats._avg?.med_salary || 0)),
             job_count: s._count.job_id,
@@ -159,12 +229,126 @@ export class SalaryInsightsService {
         }),
       );
 
-      this.logger.log(`Successfully processed ${results.length} skills`);
       return results;
     } catch (error: unknown) {
       this.handleError(error, 'By Skill');
       return [];
     }
+  }
+
+  async getTrend(filters: SalaryFilterDto): Promise<SalaryTrendDto[]> {
+    try {
+      this.logger.log(
+        `Fetching salary trend with filters: ${JSON.stringify(filters)}`,
+      );
+      const jobWhereInput = this.buildWhereCondition(filters);
+
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+      const salaryRecords = await this.prisma.salary.findMany({
+        where: {
+          med_salary: { not: null },
+          job: {
+            ...jobWhereInput,
+            listed_time: { gte: sixMonthsAgo },
+            AND: [
+              { formatted_experience_level: { not: null } },
+              { formatted_experience_level: { not: '' } },
+            ],
+          },
+        },
+        select: {
+          med_salary: true,
+          job: {
+            select: {
+              listed_time: true,
+              formatted_experience_level: true,
+            },
+          },
+        },
+      });
+
+      const groupMap = new Map<
+        string,
+        { totalSalary: number; count: number; monthStr: string; level: string }
+      >();
+      const monthNames = [
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
+      ];
+
+      for (const record of salaryRecords) {
+        if (!record.job?.listed_time || !record.job?.formatted_experience_level)
+          continue;
+
+        const date = new Date(record.job.listed_time);
+        const monthStr = monthNames[date.getMonth()];
+        const level = record.job.formatted_experience_level;
+        const key = `${monthStr}_${level}`;
+
+        const current = groupMap.get(key) || {
+          totalSalary: 0,
+          count: 0,
+          monthStr,
+          level,
+        };
+        current.totalSalary += Number(record.med_salary);
+        current.count += 1;
+        groupMap.set(key, current);
+      }
+
+      const trendResults = Array.from(groupMap.values()).map((g) => ({
+        month: g.monthStr,
+        level: g.level,
+        avg_salary: Math.round(g.totalSalary / g.count),
+      }));
+
+      const monthOrder = {};
+      for (let i = 0; i < 6; i++) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        monthOrder[monthNames[d.getMonth()]] = 5 - i;
+      }
+
+      return trendResults.sort(
+        (a, b) => (monthOrder[a.month] || 0) - (monthOrder[b.month] || 0),
+      );
+    } catch (error: unknown) {
+      this.handleError(error, 'Trend 6 Months');
+      return [];
+    }
+  }
+
+  private buildWhereCondition(filters: SalaryFilterDto): Prisma.JobWhereInput {
+    const condition: Prisma.JobWhereInput = {};
+
+    if (filters.role) {
+      condition.job_category = filters.role;
+    }
+    if (filters.location) {
+      condition.location = filters.location;
+    }
+    if (filters.level) {
+      condition.formatted_experience_level = filters.level;
+    }
+    if (filters.skill_id) {
+      condition.job_skills = {
+        some: { skill_id: Number(filters.skill_id) },
+      };
+    }
+
+    return condition;
   }
 
   private calculatePercentile(data: number[], percentile: number): number {

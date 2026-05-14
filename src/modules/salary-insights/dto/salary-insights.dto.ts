@@ -1,4 +1,17 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+export class SalaryFilterDto {
+  @ApiPropertyOptional() role?: string;
+  @ApiPropertyOptional() location?: string;
+  @ApiPropertyOptional() skill_id?: string;
+  @ApiPropertyOptional() level?: string;
+}
+
+export class SalaryTrendDto {
+  @ApiProperty() month: string;
+  @ApiProperty() level: string;
+  @ApiProperty() avg_salary: number;
+}
 
 export class SalarySummaryDto {
   @ApiProperty() average_salary: number;
