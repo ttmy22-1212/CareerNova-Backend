@@ -9,6 +9,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-profile.dto';
+import { UpdateOnboardingProgressDto } from './dto/update-onboarding-progress.dto';
 
 @Injectable()
 export class ProfileService {
@@ -27,6 +28,13 @@ export class ProfileService {
         email: true,
         avatar_url: true,
         role: true,
+        major: true,
+        school: true,
+        current_year: true,
+        orientation: true,
+        objective: true,
+        current_step: true,
+        onboarding_completed: true,
         auth_providers: {
           select: { provider: true, last_login_at: true },
         },
@@ -54,6 +62,8 @@ export class ProfileService {
           include: {
             job: {
               select: {
+                job_id: true,
+                company_id: true,
                 title: true,
                 company: { select: { name: true } },
               },
@@ -71,6 +81,13 @@ export class ProfileService {
         email: user.email,
         avatar_url: user.avatar_url,
         role: user.role,
+        major: user.major,
+        school: user.school,
+        current_year: user.current_year,
+        orientation: user.orientation,
+        objective: user.objective,
+        current_step: user.current_step,
+        onboarding_completed: user.onboarding_completed,
       },
       auth_providers: user.auth_providers,
       latest_cv: latestCv
@@ -82,8 +99,135 @@ export class ProfileService {
         : null,
       cv_skills_summary:
         latestCv?.cv_skills.map((s) => s.skill.skill_name) || [],
-      latest_match_summary: latestMatchSummary,
+      latest_match_summary: latestMatchSummary
+        ? {
+            ...latestMatchSummary,
+            // Ép kiểu match_id nếu nó là BigInt
+            match_id: this.stringifyId(latestMatchSummary.match_id),
+            cv_id: this.stringifyId(latestMatchSummary.cv_id),
+            job_id: this.stringifyId(latestMatchSummary.job_id),
+            // Ép kiểu job object bên trong
+            job: latestMatchSummary.job
+              ? {
+                  ...latestMatchSummary.job,
+                  job_id: this.stringifyId(latestMatchSummary.job.job_id),
+                  company_id: this.stringifyId(
+                    latestMatchSummary.job.company_id,
+                  ),
+                }
+              : null,
+          }
+        : null,
     };
+  }
+
+  private stringifyId(value: unknown): string | null {
+    // eslint-disable-next-line @typescript-eslint/no-base-to-string
+    return value != null ? String(value) : null;
+  }
+
+  async getOnboardingStatus(userId: string) {
+    this.logger.log(`Checking onboarding status for user ID: ${userId}`);
+
+    const user = await this.prisma.user.findUnique({
+      where: { user_id: userId },
+      select: {
+        current_step: true,
+        onboarding_completed: true,
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('USER_NOT_FOUND');
+    }
+
+    return {
+      onboarding_completed: user.onboarding_completed,
+      current_step: user.current_step,
+    };
+  }
+
+  async updateOnboardingProgress(
+    userId: string,
+    dto: UpdateOnboardingProgressDto,
+  ) {
+    this.logger.log(
+      `Updating onboarding step ${dto.current_step} for user ID: ${userId}`,
+    );
+
+    try {
+      const updatedUser = await this.prisma.user.update({
+        where: { user_id: userId },
+        data: {
+          current_step: dto.current_step,
+          // Chỉ cập nhật nếu FE truyền lên (tránh đè null vào dữ liệu cũ của bước trước)
+          ...(dto.major !== undefined && { major: dto.major }),
+          ...(dto.school !== undefined && { school: dto.school }),
+          ...(dto.current_year !== undefined && {
+            current_year: dto.current_year,
+          }),
+          ...(dto.orientation !== undefined && {
+            orientation: dto.orientation,
+          }),
+          ...(dto.objective !== undefined && { objective: dto.objective }),
+          ...(dto.target_salary !== undefined && {
+            target_salary: dto.target_salary,
+          }),
+          ...(dto.prefer_remote !== undefined && {
+            prefer_remote: dto.prefer_remote,
+          }),
+          updated_at: new Date(),
+        },
+        select: {
+          user_id: true,
+          current_step: true,
+        },
+      });
+
+      return {
+        message: 'PROGRESS_UPDATED_SUCCESSFULLY',
+        current_step: updatedUser.current_step,
+      };
+    } catch (caughtError: unknown) {
+      const error =
+        caughtError instanceof Error ? caughtError : new Error('UNKNOWN_ERROR');
+      this.logger.error(
+        `Failed to update onboarding progress for user ID: ${userId}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  async completeOnboarding(userId: string) {
+    this.logger.log(`Finalizing onboarding for user ID: ${userId}`);
+
+    try {
+      await this.prisma.user.update({
+        where: { user_id: userId },
+        data: {
+          current_step: 5,
+          onboarding_completed: true,
+          updated_at: new Date(),
+        },
+      });
+
+      this.logger.log(
+        `User ID ${userId} has successfully completed onboarding.`,
+      );
+      return {
+        message: 'ONBOARDING_FLOW_COMPLETED',
+        onboarding_completed: true,
+      };
+    } catch (caughtError: unknown) {
+      const error =
+        caughtError instanceof Error ? caughtError : new Error('UNKNOWN_ERROR');
+      this.logger.error(
+        `Failed to finalize onboarding for user ID: ${userId}`,
+        error.stack,
+      );
+      throw error;
+    }
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
@@ -106,10 +250,12 @@ export class ProfileService {
 
       this.logger.log(`Profile updated successfully for user ID: ${userId}`);
       return updatedUser;
-    } catch (error) {
+    } catch (caughtError: unknown) {
+      const error =
+        caughtError instanceof Error ? caughtError : new Error('UNKNOWN_ERROR');
       this.logger.error(
         `Failed to update profile for user ID: ${userId}`,
-        (error as Error).stack,
+        error.stack,
       );
       throw error;
     }
@@ -188,10 +334,12 @@ export class ProfileService {
 
       this.logger.log(`Account deleted permanently for user ID: ${userId}`);
       return { message: 'ACCOUNT_DELETED_PERMANENTLY' };
-    } catch (error) {
+    } catch (caughtError: unknown) {
+      const error =
+        caughtError instanceof Error ? caughtError : new Error('UNKNOWN_ERROR');
       this.logger.error(
         `Failed to delete account for user ID: ${userId}`,
-        (error as Error).stack,
+        error.stack,
       );
       throw error;
     }

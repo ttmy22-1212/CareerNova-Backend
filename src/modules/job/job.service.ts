@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { GetJobsQueryDto, SortOrder } from './dto/get-jobs-query.dto';
 import { GetJobsResponseDto, JobItemDto } from './dto/job-response.dto';
+import { GetSkillsQueryDto } from './dto/get-skills-query.dto';
+import { GetSkillsResponseDto } from './dto/skill-response.dto';
 
 @Injectable()
 export class JobService {
@@ -258,6 +260,36 @@ export class JobService {
         industries: industries,
         match_breakdown: match_breakdown,
       },
+    };
+  }
+
+  async getSkills(query: GetSkillsQueryDto): Promise<GetSkillsResponseDto> {
+    const { q } = query;
+    this.logger.log(
+      `Fetching skills master list with query: search="${q || ''}"`,
+    );
+
+    const skills = await this.prisma.skill.findMany({
+      where: q
+        ? {
+            skill_name: {
+              contains: q,
+              mode: 'insensitive',
+            },
+          }
+        : {},
+      take: 30,
+      orderBy: {
+        skill_name: 'asc',
+      },
+      select: {
+        skill_id: true,
+        skill_name: true,
+      },
+    });
+
+    return {
+      data: skills,
     };
   }
 }

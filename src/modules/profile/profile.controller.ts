@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-profile.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
+import { UpdateOnboardingProgressDto } from './dto/update-onboarding-progress.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth('JWT-auth')
@@ -41,6 +42,27 @@ export class ProfileController {
   })
   async getMe(@Req() req: AuthenticatedRequest) {
     return { data: await this.profileService.getMe(req.user.sub) };
+  }
+
+  @Get('onboarding-status')
+  @UseGuards(JwtAuthGuard)
+  async getOnboardingStatus(@Req() req: AuthenticatedRequest) {
+    return this.profileService.getOnboardingStatus(req.user.sub);
+  }
+
+  @Patch('onboarding')
+  @UseGuards(JwtAuthGuard)
+  async updateProgress(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: UpdateOnboardingProgressDto,
+  ) {
+    return this.profileService.updateOnboardingProgress(req.user.sub, dto);
+  }
+
+  @Post('onboarding-complete')
+  @UseGuards(JwtAuthGuard)
+  async completeOnboarding(@Req() req: AuthenticatedRequest) {
+    return this.profileService.completeOnboarding(req.user.sub);
   }
 
   @Patch('me')

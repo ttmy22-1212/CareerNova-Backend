@@ -7,7 +7,7 @@ import {
   UseInterceptors,
   BadRequestException,
   Get,
-  HttpStatus,
+  Body,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -23,6 +23,10 @@ import { CvService } from './cv.service';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 import { FileUploadDto } from './dto/cv-upload.dto';
 import { CvUploadResponseDto } from './dto/cv-response.dto';
+import {
+  SyncProfileSkillsDto,
+  SyncProfileSkillsResponseDto,
+} from './dto/sync-profile-skills.dto';
 
 @ApiTags('CV')
 @ApiBearerAuth('JWT-auth')
@@ -71,5 +75,18 @@ export class CvController {
   async getAllCvs(@Req() req: AuthenticatedRequest) {
     const result = await this.cvService.getAllCvs(req.user.sub);
     return { data: result };
+  }
+
+  @Post('profile-skills')
+  @ApiOperation({
+    summary:
+      'Chốt hạ danh sách kỹ năng ở Bước 3 Onboarding (Gộp file thật hoặc tự sinh CV ảo)',
+  })
+  @ApiResponse({ status: 201, type: SyncProfileSkillsResponseDto })
+  async syncProfileSkills(
+    @Req() req: AuthenticatedRequest,
+    @Body() dto: SyncProfileSkillsDto,
+  ): Promise<SyncProfileSkillsResponseDto> {
+    return this.cvService.syncProfileSkills(req.user.sub, dto);
   }
 }

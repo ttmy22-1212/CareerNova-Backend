@@ -16,6 +16,8 @@ import { JobService } from './job.service';
 import { GetJobsQueryDto } from './dto/get-jobs-query.dto';
 import { GetJobsResponseDto } from './dto/job-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { GetSkillsQueryDto } from './dto/get-skills-query.dto';
+import { GetSkillsResponseDto } from './dto/skill-response.dto';
 
 @ApiTags('Jobs')
 @ApiBearerAuth('JWT-auth')
@@ -25,8 +27,6 @@ export class JobController {
   constructor(private readonly jobService: JobService) {}
 
   @Get()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Lấy danh sách công việc (Yêu cầu đăng nhập)' })
   @ApiResponse({
     status: HttpStatus.OK,
@@ -37,9 +37,18 @@ export class JobController {
     return await this.jobService.findAll(query);
   }
 
+  @Get('skills')
+  @ApiOperation({ summary: 'Lấy danh sách kỹ năng (Yêu cầu đăng nhập)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Danh sách kỹ năng.',
+    type: GetSkillsResponseDto,
+  })
+  async getSkills(@Query() query: GetSkillsQueryDto) {
+    return await this.jobService.getSkills(query);
+  }
+
   @Get(':id')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Lấy chi tiết một công việc' })
   @ApiResponse({
     status: HttpStatus.OK,

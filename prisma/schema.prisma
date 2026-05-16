@@ -24,6 +24,8 @@ model User {
   current_year  Int?
   orientation   String?   @db.VarChar(255)
   objective     String?   @db.VarChar(255)
+  target_salary     Int?
+  prefer_remote     Boolean?
   current_step        Int       @default(1)
   onboarding_completed Boolean   @default(false)
 

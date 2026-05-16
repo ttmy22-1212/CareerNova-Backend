@@ -4,6 +4,10 @@ import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import * as streamifier from 'streamifier';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CvUploadResponseDto } from './dto/cv-response.dto';
+import {
+  SyncProfileSkillsDto,
+  SyncProfileSkillsResponseDto,
+} from './dto/sync-profile-skills.dto';
 
 @Injectable()
 export class CvService {
@@ -103,5 +107,84 @@ export class CvService {
       this.logger.error(`Get all CVs failed: ${message}`);
       throw new BadRequestException('Could not retrieve CVs');
     }
+  }
+
+  async syncProfileSkills(
+    userId: string,
+    dto: SyncProfileSkillsDto,
+  ): Promise<SyncProfileSkillsResponseDto> {
+    const { cv_id, skills } = dto;
+    this.logger.log(
+      `Syncing ${skills.length} skills for user ID: ${userId}, CV target: ${cv_id || 'VIRTUAL_CV'}`,
+    );
+
+    return await this.prisma.$transaction(async (tx) => {
+      let targetCvId = cv_id;
+
+      // nếu user không upload file thật (cv_id là null)
+      if (!targetCvId) {
+        const virtualCv = await tx.userCv.create({
+          data: {
+            user_id: userId,
+            file_name: 'Onboarding_Virtual_Profile.pdf',
+            file_url: 'internal://onboarding_virtual_cv',
+            extracted_text:
+              'Virtual CV generated from onboarding manually selected skills.',
+          },
+        });
+        targetCvId = virtualCv.cv_id;
+      } else {
+        const existingCv = await tx.userCv.findFirst({
+          where: { cv_id: targetCvId, user_id: userId },
+        });
+        if (!existingCv) {
+          throw new BadRequestException('INVALID_CV_OWNERSHIP');
+        }
+      }
+
+      await tx.userCvSkill.deleteMany({
+        where: { cv_id: targetCvId },
+      });
+
+      let insertedCount = 0;
+
+      if (skills && skills.length > 0) {
+        for (const skillName of skills) {
+          const matchedMasterSkill = await tx.skill.findFirst({
+            where: {
+              skill_name: {
+                equals: skillName,
+                mode: 'insensitive',
+              },
+            },
+          });
+
+          if (matchedMasterSkill) {
+            await tx.userCvSkill.create({
+              data: {
+                cv_id: targetCvId,
+                skill_id: matchedMasterSkill.skill_id,
+              },
+            });
+            insertedCount++;
+          } else {
+            this.logger.warn(
+              `Skill name "${skillName}" không trùng khớp với bất kỳ từ khóa nào trong Master DB.`,
+            );
+          }
+        }
+      }
+
+      await tx.user.update({
+        where: { user_id: userId },
+        data: { current_step: 4 },
+      });
+
+      return {
+        message: 'SKILLS_SYNCED_SUCCESSFULLY',
+        cv_id: targetCvId,
+        synced_count: insertedCount,
+      };
+    });
   }
 }
