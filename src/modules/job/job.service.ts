@@ -26,28 +26,37 @@ export class JobService {
 
     const skip = (Math.max(1, page) - 1) * limit;
 
+    const andConditions: Prisma.JobWhereInput[] = [
+      q
+        ? {
+            OR: [
+              { title: { contains: q, mode: 'insensitive' } },
+              { skills_desc: { contains: q, mode: 'insensitive' } },
+              { company: { name: { contains: q, mode: 'insensitive' } } },
+            ],
+          }
+        : {},
+      work_type ? { work_type } : {},
+      location ? { location: { contains: location, mode: 'insensitive' } } : {},
+      experience_level ? { formatted_experience_level: experience_level } : {},
+    ];
+
+    if (sortBy === 'match_score' && cv_id) {
+      andConditions.push({
+        cv_matches: {
+          some: {
+            cv_id: cv_id,
+            match_score: { not: null },
+          },
+        },
+      });
+    }
+
     const where: Prisma.JobWhereInput = {
-      AND: [
-        q
-          ? {
-              OR: [
-                { title: { contains: q, mode: 'insensitive' } },
-                { skills_desc: { contains: q, mode: 'insensitive' } },
-                { company: { name: { contains: q, mode: 'insensitive' } } },
-              ],
-            }
-          : {},
-        work_type ? { work_type } : {},
-        location
-          ? { location: { contains: location, mode: 'insensitive' } }
-          : {},
-        experience_level
-          ? { formatted_experience_level: experience_level }
-          : {},
-      ],
+      AND: andConditions,
     };
 
-    if (cv_id && min_match !== undefined) {
+    if (sortBy !== 'match_score' && cv_id && min_match !== undefined) {
       where.cv_matches = {
         some: {
           cv_id,
@@ -59,16 +68,7 @@ export class JobService {
     // Aggregate for Salary
     let orderBy: any;
 
-    if (sortBy === 'salary_med') {
-      // Sort by median salary from the related Salary table
-      orderBy = {
-        salaries: {
-          _max: {
-            med_salary: sortOrder,
-          },
-        },
-      };
-    } else if (sortBy === 'match_score') {
+    if (sortBy === 'salary_med' || sortBy === 'match_score') {
       orderBy = undefined;
     } else {
       orderBy = { [sortBy]: sortOrder };
@@ -149,6 +149,17 @@ export class JobService {
           ? (b.match_score || 0) - (a.match_score || 0)
           : (a.match_score || 0) - (b.match_score || 0),
       );
+    }
+
+    if (sortBy === 'salary_med') {
+      formattedData.sort((a, b) => {
+        const salaryA = a.salary?.med_salary ? Number(a.salary.med_salary) : 0;
+        const salaryB = b.salary?.med_salary ? Number(b.salary.med_salary) : 0;
+
+        return sortOrder === SortOrder.DESC
+          ? salaryB - salaryA
+          : salaryA - salaryB;
+      });
     }
 
     return {

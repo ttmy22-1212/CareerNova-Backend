@@ -78,4 +78,30 @@ export class CvService {
       streamifier.createReadStream(file.buffer).pipe(uploadStream);
     });
   }
+
+  async getAllCvs(userId: string): Promise<CvUploadResponseDto[]> {
+    try {
+      this.logger.log(`Fetching all CVs for user: ${userId}`);
+
+      const cvs = await this.prisma.userCv.findMany({
+        where: {
+          user_id: userId,
+        },
+        orderBy: {
+          uploaded_at: 'desc',
+        },
+      });
+
+      return cvs.map((cv) => ({
+        cv_id: cv.cv_id,
+        file_name: cv.file_name ?? '',
+        file_url: cv.file_url ?? '',
+        uploaded_at: cv.uploaded_at ?? new Date(),
+      }));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Get all CVs failed: ${message}`);
+      throw new BadRequestException('Could not retrieve CVs');
+    }
+  }
 }

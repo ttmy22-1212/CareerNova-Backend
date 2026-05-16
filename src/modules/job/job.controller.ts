@@ -18,6 +18,8 @@ import { GetJobsResponseDto } from './dto/job-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Jobs')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(JwtAuthGuard)
 @Controller('jobs')
 export class JobController {
   constructor(private readonly jobService: JobService) {}

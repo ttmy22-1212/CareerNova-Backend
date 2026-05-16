@@ -12,6 +12,9 @@ class SalaryDto {
   @ApiProperty({ example: '1000.00' })
   min_salary: string | null;
 
+  @ApiProperty({ example: '1500.00' })
+  med_salary: string | null;
+
   @ApiProperty({ example: '2000.00' })
   max_salary: string | null;
 

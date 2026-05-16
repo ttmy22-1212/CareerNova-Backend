@@ -6,6 +6,8 @@ import {
   UploadedFile,
   UseInterceptors,
   BadRequestException,
+  Get,
+  HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -58,6 +60,16 @@ export class CvController {
     }
 
     const result = await this.cvService.uploadCv(req.user.sub, file);
+    return { data: result };
+  }
+
+  @Get()
+  @ApiOperation({
+    summary: 'Lấy danh sách tất cả CV của user (Mới nhất xếp đầu)',
+  })
+  @ApiResponse({ status: 200, type: [CvUploadResponseDto] })
+  async getAllCvs(@Req() req: AuthenticatedRequest) {
+    const result = await this.cvService.getAllCvs(req.user.sub);
     return { data: result };
   }
 }
