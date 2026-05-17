@@ -5,6 +5,7 @@ import {
   Query,
   HttpStatus,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -18,6 +19,7 @@ import { GetJobsResponseDto } from './dto/job-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetSkillsQueryDto } from './dto/get-skills-query.dto';
 import { GetSkillsResponseDto } from './dto/skill-response.dto';
+import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 
 @ApiTags('Jobs')
 @ApiBearerAuth('JWT-auth')
@@ -33,8 +35,11 @@ export class JobController {
     description: 'Danh sách công việc kèm match_score nếu có cv_id.',
     type: GetJobsResponseDto,
   })
-  async findAll(@Query() query: GetJobsQueryDto) {
-    return await this.jobService.findAll(query);
+  async findAll(
+    @Req() req: AuthenticatedRequest,
+    @Query() query: GetJobsQueryDto,
+  ) {
+    return await this.jobService.findAll(req.user.sub, query);
   }
 
   @Get('skills')
@@ -58,7 +63,11 @@ export class JobController {
     status: HttpStatus.NOT_FOUND,
     description: 'RESOURCE_NOT_FOUND',
   })
-  async findOne(@Param('id') id: string, @Query('cv_id') cvId?: string) {
-    return await this.jobService.findOne(id, cvId);
+  async findOne(
+    @Req() req: AuthenticatedRequest,
+    @Param('id') id: string,
+    @Query('cv_id') cvId?: string,
+  ) {
+    return await this.jobService.findOne(req.user.sub, id, cvId);
   }
 }

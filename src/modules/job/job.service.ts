@@ -12,7 +12,10 @@ export class JobService {
 
   constructor(private prisma: PrismaService) {}
 
-  async findAll(query: GetJobsQueryDto): Promise<GetJobsResponseDto> {
+  async findAll(
+    userId: string,
+    query: GetJobsQueryDto,
+  ): Promise<GetJobsResponseDto> {
     const {
       page = 1,
       limit = 20,
@@ -106,6 +109,11 @@ export class JobService {
                 take: 1,
               }
             : false,
+          saved_by: {
+            where: { user_id: userId },
+            select: { saved_job_id: true },
+            take: 1,
+          },
         },
       }),
     ]);
@@ -114,6 +122,7 @@ export class JobService {
     const formattedData: JobItemDto[] = jobs.map((job) => {
       const matchRecord = job.cv_matches?.[0];
       const salary = job.salaries[0] || null;
+      const is_saved = job.saved_by && job.saved_by.length > 0;
 
       return {
         job_id: job.job_id.toString(),
@@ -141,6 +150,7 @@ export class JobService {
           is_inferred: js.is_inferred || false,
         })),
         match_score: matchRecord ? Number(matchRecord.match_score) : null,
+        is_saved: is_saved,
       };
     });
 
@@ -175,7 +185,7 @@ export class JobService {
     };
   }
 
-  async findOne(jobId: string, cvId?: string) {
+  async findOne(userId: string, jobId: string, cvId?: string) {
     this.logger.log(`Fetching job details for ID: ${jobId}, CV ID: ${cvId}`);
 
     const job = await this.prisma.job.findUnique({
@@ -202,6 +212,11 @@ export class JobService {
               take: 1,
             }
           : false,
+        saved_by: {
+          where: { user_id: userId },
+          select: { saved_job_id: true },
+          take: 1,
+        },
       },
     });
 
@@ -218,7 +233,7 @@ export class JobService {
       partial: [],
       missing: [],
     };
-
+    const is_saved = job.saved_by && job.saved_by.length > 0;
     return {
       data: {
         job: {
@@ -259,6 +274,7 @@ export class JobService {
         })),
         industries: industries,
         match_breakdown: match_breakdown,
+        is_saved: is_saved,
       },
     };
   }

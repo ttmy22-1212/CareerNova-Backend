@@ -63,6 +63,9 @@ export class JobItemDto {
 
   @ApiProperty({ example: 82.5, nullable: true })
   match_score: number | null;
+
+  @ApiProperty({ example: false, nullable: true })
+  is_saved: boolean | null;
 }
 
 export class GetJobsResponseDto {

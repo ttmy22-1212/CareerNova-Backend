@@ -33,8 +33,11 @@ export class ProfileService {
         current_year: true,
         orientation: true,
         objective: true,
+        target_salary: true,
+        prefer_remote: true,
         current_step: true,
         onboarding_completed: true,
+        created_at: true,
         auth_providers: {
           select: { provider: true, last_login_at: true },
         },
@@ -86,10 +89,15 @@ export class ProfileService {
         current_year: user.current_year,
         orientation: user.orientation,
         objective: user.objective,
+        target_salary: user.target_salary,
+        prefer_remote: user.prefer_remote,
         current_step: user.current_step,
         onboarding_completed: user.onboarding_completed,
       },
       auth_providers: user.auth_providers,
+      created_at: user.created_at
+        ? new Date(user.created_at).getTime()
+        : Date.now(),
       latest_cv: latestCv
         ? {
             cv_id: latestCv.cv_id,
@@ -342,6 +350,110 @@ export class ProfileService {
         error.stack,
       );
       throw error;
+    }
+  }
+
+  async getSavedJobs(userId: string) {
+    this.logger.log(`Fetching saved jobs for user ID: ${userId}`);
+
+    const savedJobs = await this.prisma.savedJob.findMany({
+      where: { user_id: userId },
+      orderBy: { created_at: 'desc' },
+      include: {
+        job: {
+          include: {
+            company: {
+              select: { name: true, url: true },
+            },
+          },
+        },
+      },
+    });
+
+    return savedJobs.map((item) => ({
+      saved_job_id: item.saved_job_id,
+      created_at: item.created_at,
+      job: item.job
+        ? {
+            ...item.job,
+            job_id: this.stringifyId(item.job.job_id),
+            company_id: this.stringifyId(item.job.company_id),
+          }
+        : null,
+    }));
+  }
+
+  async saveJob(userId: string, jobIdStr: string) {
+    this.logger.log(`User ID ${userId} is saving job ID: ${jobIdStr}`);
+
+    const jobId = BigInt(jobIdStr);
+
+    const jobExists = await this.prisma.job.findUnique({
+      where: { job_id: jobId },
+    });
+
+    if (!jobExists) {
+      this.logger.warn(`Save job failed: Job ID ${jobIdStr} not found`);
+      throw new NotFoundException('JOB_NOT_FOUND');
+    }
+
+    try {
+      const savedJob = await this.prisma.savedJob.upsert({
+        where: {
+          user_id_job_id: {
+            user_id: userId,
+            job_id: jobId,
+          },
+        },
+        update: {},
+        create: {
+          user_id: userId,
+          job_id: jobId,
+        },
+      });
+
+      return {
+        message: 'JOB_SAVED_SUCCESSFULLY',
+        saved_job_id: savedJob.saved_job_id,
+        job_id: jobIdStr,
+      };
+    } catch (caughtError: unknown) {
+      const error =
+        caughtError instanceof Error ? caughtError : new Error('UNKNOWN_ERROR');
+      this.logger.error(
+        `Failed to save job ${jobIdStr} for user ${userId}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  async deleteSavedJob(userId: string, jobIdStr: string) {
+    this.logger.log(`User ID ${userId} is removing saved job ID: ${jobIdStr}`);
+
+    const jobId = BigInt(jobIdStr);
+
+    try {
+      await this.prisma.savedJob.delete({
+        where: {
+          user_id_job_id: {
+            user_id: userId,
+            job_id: jobId,
+          },
+        },
+      });
+
+      return { message: 'SAVED_JOB_REMOVED_SUCCESSFULLY' };
+    } catch (caughtError: unknown) {
+      this.logger.warn(
+        `Failed to delete saved job: Record not found or database error`,
+      );
+      throw new NotFoundException(
+        'SAVED_JOB_NOT_FOUND_OR_ALREADY_DELETED',
+        caughtError instanceof Error
+          ? caughtError.message
+          : String(caughtError),
+      );
     }
   }
 }

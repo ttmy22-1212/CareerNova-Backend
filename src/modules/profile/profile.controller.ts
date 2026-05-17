@@ -9,12 +9,14 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  Param,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiBearerAuth,
   ApiResponse,
+  ApiParam,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -22,6 +24,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-profile.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 import { UpdateOnboardingProgressDto } from './dto/update-onboarding-progress.dto';
+import { SaveJobDto } from './dto/save-job.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth('JWT-auth')
@@ -123,5 +126,52 @@ export class ProfileController {
   })
   async deleteAccount(@Req() req: AuthenticatedRequest) {
     return await this.profileService.deleteAccount(req.user.sub);
+  }
+
+  @Get('saved-jobs')
+  @ApiOperation({ summary: 'Lấy danh sách công việc đã lưu' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Danh sách các công việc đã lưu của user thành công.',
+  })
+  async getSavedJobs(@Req() req: AuthenticatedRequest) {
+    return { data: await this.profileService.getSavedJobs(req.user.sub) };
+  }
+
+  @Post('saved-jobs')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Lưu công việc' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Lưu công việc thành công.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'JOB_NOT_FOUND',
+  })
+  async saveJob(@Req() req: AuthenticatedRequest, @Body() dto: SaveJobDto) {
+    return await this.profileService.saveJob(req.user.sub, dto.job_id);
+  }
+
+  @Delete('saved-jobs/:jobId')
+  @ApiOperation({ summary: 'Hủy lưu công việc' })
+  @ApiParam({
+    name: 'jobId',
+    type: String,
+    description: 'ID của công việc cần hủy lưu',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Hủy lưu công việc thành công.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'SAVED_JOB_NOT_FOUND_OR_ALREADY_DELETED',
+  })
+  async deleteSavedJob(
+    @Req() req: AuthenticatedRequest,
+    @Param('jobId') jobId: string,
+  ) {
+    return await this.profileService.deleteSavedJob(req.user.sub, jobId);
   }
 }
