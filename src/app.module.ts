@@ -10,6 +10,7 @@ import { JobModule } from './modules/job/job.module';
 import { CvModule } from './modules/cv/cv.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SalaryInsightsModule } from './modules/salary-insights/salary-insights.module';
+import { MarketDashboardModule } from './modules/market-dashboard/market-dashboard.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SalaryInsightsModule } from './modules/salary-insights/salary-insights.
     CvModule,
     DashboardModule,
     SalaryInsightsModule,
+    MarketDashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
