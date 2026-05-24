@@ -8,31 +8,35 @@ datasource db {
 }
 
 model User {
-  user_id       String    @id @default(uuid()) @db.Uuid
-  full_name     String?   @db.VarChar(255)
-  email         String?   @unique @db.VarChar(255)
-  password_hash String?   @db.Text
-  avatar_url    String?   @db.Text
-  role          String    @default("student") @db.VarChar(50)
-  created_at    DateTime? @default(now()) @db.Timestamp(6)
-  updated_at    DateTime? @default(now()) @db.Timestamp(6)
-  is_active     Boolean   @default(false)
-  verify_token  String?   @db.Text
-  verify_token_expires DateTime? @db.Timestamp(6)
-  school        String?   @db.VarChar(255)
-  major         String?   @db.VarChar(255)
-  current_year  Int?
-  orientation   String?   @db.VarChar(255)
-  objective     String?   @db.VarChar(255)
-  target_salary     Int?
-  prefer_remote     Boolean?
-  current_step        Int       @default(1)
-  onboarding_completed Boolean   @default(false)
+  user_id              String             @id @default(uuid()) @db.Uuid
+  full_name            String?            @db.VarChar(255)
+  email                String?            @unique @db.VarChar(255)
+  password_hash        String?
+  avatar_url           String?
+  role                 String             @default("student") @db.VarChar(50)
+  created_at           DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?          @default(now()) @db.Timestamp(6)
+  is_active            Boolean            @default(false)
+  verify_token         String?
+  verify_token_expires DateTime?          @db.Timestamp(6)
+  school               String?            @db.VarChar(255)
+  major                String?            @db.VarChar(255)
+  current_year         Int?
+  orientation          String?            @db.VarChar(255)
+  objective            String?            @db.VarChar(255)
+  target_salary        Int?
+  prefer_remote        Boolean?
+  current_step         Int                @default(1)
+  onboarding_completed Boolean            @default(false)
+  notifications        Notification[]
+  saved_jobs           SavedJob[]
+  auth_providers       UserAuthProvider[]
+  cvs                  UserCv[]
+  default_cv_id        String?   @unique @db.Uuid
+  default_cv           UserCv?   @relation("UserDefaultCv", fields: [default_cv_id], references: [cv_id], onDelete: SetNull)
 
-  auth_providers UserAuthProvider[]
-  cvs            UserCv[]
-  notifications  Notification[]
-  saved_jobs     SavedJob[]
+  default_match_id     String?   @unique @db.Uuid
+  default_match        CvJobMatch? @relation("UserDefaultMatch", fields: [default_match_id], references: [match_id], onDelete: SetNull)
 
   @@map("users")
 }
@@ -44,44 +48,42 @@ model UserAuthProvider {
   provider_user_id    String    @db.VarChar(255)
   provider_email      String?   @db.VarChar(255)
   provider_name       String?   @db.VarChar(255)
-  provider_avatar_url String?   @db.Text
+  provider_avatar_url String?
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   last_login_at       DateTime? @db.Timestamp(6)
-
-  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  user                User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@unique([provider, provider_user_id])
   @@map("user_auth_providers")
 }
 
 model UserCv {
-  cv_id          String    @id @default(uuid()) @db.Uuid
-  user_id        String    @db.Uuid
-  file_name      String?   @db.VarChar(255)
-  file_url       String?   @db.Text
-  extracted_text String?   @db.Text
-  uploaded_at    DateTime? @default(now()) @db.Timestamp(6)
-  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+  cv_id          String        @id @default(uuid()) @db.Uuid
+  user_id        String        @db.Uuid
+  file_name      String?       @db.VarChar(255)
+  file_url       String?
+  extracted_text String?
+  uploaded_at    DateTime?     @default(now()) @db.Timestamp(6)
+  updated_at     DateTime?     @default(now()) @db.Timestamp(6)
+  matches        CvJobMatch[]
+  cv_skills      UserCvSkill[]
+  user           User          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
-  user      User          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-  cv_skills UserCvSkill[]
-  matches   CvJobMatch[]
-
+  default_for_user User?       @relation("UserDefaultCv")
   @@index([user_id], map: "idx_user_cvs_user_id")
   @@map("user_cvs")
 }
 
 model Skill {
-  skill_id   Int       @id @default(autoincrement())
-  skill_name String    @unique @db.VarChar(255)
-  category   String?   @db.VarChar(255)
-  created_at DateTime? @default(now()) @db.Timestamp(6)
-  type       String?   @db.VarChar(100)
-  updated_at DateTime? @default(now()) @db.Timestamp(6)
-
-  user_cv_skills          UserCvSkill[]
-  job_skills              JobSkill[]
+  skill_id                Int                   @id @default(autoincrement())
+  skill_name              String                @unique @db.VarChar(255)
+  category                String?               @db.VarChar(255)
+  created_at              DateTime?             @default(now()) @db.Timestamp(6)
+  type                    String?               @db.VarChar(100)
+  updated_at              DateTime?             @default(now()) @db.Timestamp(6)
   job_group_skill_weights JobGroupSkillWeight[]
+  job_skills              JobSkill[]
+  user_cv_skills          UserCvSkill[]
 
   @@map("skills")
 }
@@ -90,9 +92,8 @@ model UserCvSkill {
   cv_id      String    @db.Uuid
   skill_id   Int
   created_at DateTime? @default(now()) @db.Timestamp(6)
-
-  cv    UserCv @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
-  skill Skill  @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+  cv         UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
+  skill      Skill     @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
 
   @@id([cv_id, skill_id])
   @@index([skill_id], map: "idx_user_cv_skills_skill_id")
@@ -100,28 +101,26 @@ model UserCvSkill {
 }
 
 model Company {
-  company_id       BigInt    @id
-  name             String    @db.VarChar(255)
-  description      String?   @db.Text
-  company_size_min Int?
-  company_size_max Int?
-  country          String?   @db.VarChar(100)
-  city             String?   @db.VarChar(100)
-  address          String?   @db.Text
-  url              String?   @db.VarChar(500)
-  industry         String?   @db.VarChar(255)
-  updated_at       DateTime? @default(now()) @db.Timestamp(6)
-
-  jobs               Job[]
+  company_id         BigInt            @id
+  name               String            @db.VarChar(255)
+  description        String?
+  company_size_min   Int?
+  company_size_max   Int?
+  country            String?           @db.VarChar(100)
+  city               String?           @db.VarChar(100)
+  address            String?
+  url                String?           @db.VarChar(500)
+  industry           String?           @db.VarChar(255)
+  updated_at         DateTime?         @default(now()) @db.Timestamp(6)
   company_industries CompanyIndustry[]
+  jobs               Job[]
 
   @@map("companies")
 }
 
 model Industry {
-  industry_id   Int    @id @default(autoincrement())
-  industry_name String @unique @db.VarChar(255)
-
+  industry_id        Int               @id @default(autoincrement())
+  industry_name      String            @unique @db.VarChar(255)
   company_industries CompanyIndustry[]
 
   @@map("industries")
@@ -130,43 +129,41 @@ model Industry {
 model CompanyIndustry {
   company_id  BigInt
   industry_id Int
-
-  company  Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
-  industry Industry @relation(fields: [industry_id], references: [industry_id], onDelete: Cascade)
+  company     Company  @relation(fields: [company_id], references: [company_id], onDelete: Cascade)
+  industry    Industry @relation(fields: [industry_id], references: [industry_id], onDelete: Cascade)
 
   @@id([company_id, industry_id])
   @@map("company_industries")
 }
 
 model Job {
-  job_id                     BigInt    @id @default(autoincrement())
+  job_id                     BigInt       @id @default(autoincrement())
   company_id                 BigInt?
-  title                      String    @db.VarChar(500)
-  skills_desc                String?   @db.Text
-  description                String?   @db.Text
-  formatted_experience_level String?   @db.VarChar(100)
-  work_type                  String?   @db.VarChar(100)
-  location                   String?   @db.VarChar(255)
-  is_remote                  Boolean?  @default(false)
-  listed_time                DateTime? @db.Timestamptz(6)
-  expiry_time                DateTime? @db.Timestamptz(6)
-  job_posting_url            String?   @db.Text
-  scraped_at                 DateTime? @default(now()) @db.Timestamp(6)
-  applies                    Int?      @default(0)
-  views                      Int?      @default(0)
-  fingerprint                String?   @unique @db.VarChar(32)
-  job_category               String?   @db.VarChar(100)
-  search_group               String?   @db.VarChar(100)
-  source_name                String?   @db.VarChar(50)
-  source_id                  String?   @db.VarChar(255)
-  updated_at                 DateTime? @default(now()) @db.Timestamp(6)
-
-  company      Company?     @relation(fields: [company_id], references: [company_id], onDelete: SetNull)
-  salaries     Salary[]
-  job_skills   JobSkill[]
-  job_benefits JobBenefit[]
-  cv_matches   CvJobMatch[]
-  saved_by     SavedJob[]
+  title                      String       @db.VarChar(500)
+  skills_desc                String?
+  description                String?
+  formatted_experience_level String?      @db.VarChar(100)
+  work_type                  String?      @db.VarChar(100)
+  location                   String?      @db.VarChar(255)
+  is_remote                  Boolean?     @default(false)
+  listed_time                DateTime?    @db.Timestamptz(6)
+  expiry_time                DateTime?    @db.Timestamptz(6)
+  job_posting_url            String?
+  scraped_at                 DateTime?    @default(now()) @db.Timestamp(6)
+  applies                    Int?         @default(0)
+  views                      Int?         @default(0)
+  fingerprint                String?      @unique @db.VarChar(32)
+  job_category               String?      @db.VarChar(100)
+  search_group               String?      @db.VarChar(100)
+  source_name                String?      @db.VarChar(50)
+  source_id                  String?      @db.VarChar(255)
+  updated_at                 DateTime?    @default(now()) @db.Timestamp(6)
+  cv_matches                 CvJobMatch[]
+  job_benefits               JobBenefit[]
+  job_skills                 JobSkill[]
+  company                    Company?     @relation(fields: [company_id], references: [company_id])
+  salaries                   Salary[]
+  saved_by                   SavedJob[]
 
   @@index([company_id], map: "idx_jobs_company_id")
   @@index([formatted_experience_level], map: "idx_jobs_experience")
@@ -187,8 +184,7 @@ model Salary {
   med_salary Decimal? @db.Decimal(18, 2)
   currency   String?  @default("VND") @db.VarChar(10)
   pay_period String?  @db.VarChar(20)
-
-  job Job? @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  job        Job?     @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
 
   @@index([job_id], map: "idx_salaries_job_id")
   @@map("salaries")
@@ -198,20 +194,18 @@ model JobSkill {
   job_id      BigInt
   skill_id    Int
   is_inferred Boolean? @default(false)
-
-  job   Job   @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
-  skill Skill @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+  job         Job      @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  skill       Skill    @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
 
   @@id([job_id, skill_id])
   @@map("job_skills")
 }
 
 model Benefit {
-  benefit_id   Int       @id @default(autoincrement())
-  benefit_name String    @unique @db.VarChar(255)
-  category     String?   @db.VarChar(100)
-  created_at   DateTime? @default(now()) @db.Timestamp(6)
-
+  benefit_id   Int          @id @default(autoincrement())
+  benefit_name String       @unique @db.VarChar(255)
+  category     String?      @db.VarChar(100)
+  created_at   DateTime?    @default(now()) @db.Timestamp(6)
   job_benefits JobBenefit[]
 
   @@map("benefits")
@@ -221,9 +215,8 @@ model JobBenefit {
   job_id      BigInt
   benefit_id  Int
   is_inferred Boolean? @default(false)
-
-  job     Job     @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
-  benefit Benefit @relation(fields: [benefit_id], references: [benefit_id], onDelete: Cascade)
+  benefit     Benefit  @relation(fields: [benefit_id], references: [benefit_id], onDelete: Cascade)
+  job         Job      @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
 
   @@id([job_id, benefit_id])
   @@map("job_benefits")
@@ -233,8 +226,7 @@ model JobGroupSkillWeight {
   search_group String  @db.VarChar(100)
   skill_id     Int
   weight_wi    Decimal @db.Decimal(8, 4)
-
-  skill Skill @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+  skill        Skill   @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
 
   @@id([search_group, skill_id])
   @@map("job_group_skill_weights")
@@ -252,9 +244,9 @@ model CvJobMatch {
   model_version String?   @db.VarChar(100)
   created_at    DateTime? @default(now()) @db.Timestamp(6)
   updated_at    DateTime? @default(now()) @db.Timestamp(6)
-
-  cv  UserCv @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
-  job Job?   @relation(fields: [job_id], references: [job_id], onDelete: SetNull)
+  cv            UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
+  job           Job?      @relation(fields: [job_id], references: [job_id])
+  default_for_user User?       @relation("UserDefaultMatch")
 
   @@index([created_at], map: "idx_cv_job_matches_created_at")
   @@index([cv_id], map: "idx_cv_job_matches_cv_id")
@@ -271,8 +263,8 @@ model NotificationTemplate {
   type                String   @default("system") @db.VarChar(50)
   priority            String   @default("normal") @db.VarChar(20)
   title_template      String   @db.VarChar(255)
-  message_template    String   @db.Text
-  action_url_template String?  @db.Text
+  message_template    String
+  action_url_template String?
   metadata_schema     Json     @default("{}")
   is_active           Boolean  @default(true)
   created_at          DateTime @default(now()) @db.Timestamp(6)
@@ -287,8 +279,8 @@ model Notification {
   user_id         String    @db.Uuid
   type            String    @default("system") @db.VarChar(50)
   title           String    @db.VarChar(255)
-  message         String    @db.Text
-  action_url      String?   @db.Text
+  message         String
+  action_url      String?
   entity_type     String?   @db.VarChar(50)
   entity_id       String?
   status          String    @default("unread") @db.VarChar(20)
@@ -298,8 +290,7 @@ model Notification {
   metadata        Json      @default("{}")
   created_at      DateTime  @default(now()) @db.Timestamp(6)
   updated_at      DateTime  @default(now()) @db.Timestamp(6)
-
-  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  user            User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@index([entity_type, entity_id], map: "idx_notifications_entity")
   @@index([user_id, created_at(sort: Desc)], map: "idx_notifications_user_created_at")
@@ -312,11 +303,9 @@ model SavedJob {
   saved_job_id String   @id @default(uuid()) @db.Uuid
   user_id      String   @db.Uuid
   job_id       BigInt
-
   created_at   DateTime @default(now()) @db.Timestamp(6)
-
-  user         User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   job          Job      @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  user         User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@unique([user_id, job_id])
   @@index([user_id], map: "idx_saved_jobs_user_id")

@@ -1,0 +1,57 @@
+import { ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
+
+export class AnalyzeCvDto {
+  @ApiProperty({
+    example: 'uuid-string-of-cv',
+    description: 'ID của CV trong hệ thống',
+  })
+  @IsUUID()
+  @IsNotEmpty()
+  cv_id: string;
+
+  @ApiProperty({
+    example: 'Senior React Developer',
+    description: 'Tên nhóm công việc mục tiêu',
+  })
+  @IsString()
+  @IsNotEmpty()
+  search_group: string;
+}
+
+export class CheckHistoryResponseDto {
+  @ApiProperty({ example: true })
+  has_history: boolean;
+
+  @ApiProperty({ example: 'uuid-of-latest-match', nullable: true })
+  latest_match_id: string | null;
+}
+
+export class CvJobMatchResultDto {
+  @ApiProperty({ example: 'uuid-string-of-match' })
+  match_id: string;
+
+  @ApiProperty({ example: 'uuid-string-of-cv' })
+  cv_id: string;
+
+  @ApiProperty({ example: 'job_group' })
+  match_type: string;
+
+  @ApiProperty({ example: 'Senior React Developer' })
+  search_group: string | null;
+
+  @ApiProperty({ example: 0.57 })
+  match_score: number | null;
+
+  @ApiProperty({ description: 'Dữ liệu kỹ năng khớp cho biểu đồ radar' })
+  radar_data: any; // Hoặc để Record<string, any> tùy cấu trúc tsconfig
+
+  @ApiProperty({ description: 'Báo cáo thiếu hụt kỹ năng' })
+  gap_report: any;
+
+  @ApiProperty({ example: '2026-05-23T00:00:00.000Z' })
+  created_at: Date;
+
+  @ApiProperty({ example: '2026-05-23T00:00:00.000Z' })
+  updated_at: Date;
+}

@@ -11,6 +11,7 @@ import { CvModule } from './modules/cv/cv.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SalaryInsightsModule } from './modules/salary-insights/salary-insights.module';
 import { MarketDashboardModule } from './modules/market-dashboard/market-dashboard.module';
+import { MatchingModule } from './modules/matching/matching.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { MarketDashboardModule } from './modules/market-dashboard/market-dashboa
     DashboardModule,
     SalaryInsightsModule,
     MarketDashboardModule,
+    MatchingModule,
   ],
   controllers: [AppController],
   providers: [AppService],

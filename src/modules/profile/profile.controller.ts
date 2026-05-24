@@ -174,4 +174,38 @@ export class ProfileController {
   ) {
     return await this.profileService.deleteSavedJob(req.user.sub, jobId);
   }
+
+  @Patch('default-cv')
+  @ApiOperation({ summary: 'Đặt một CV làm mặc định cho ứng viên' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Cập nhật CV mặc định thành công.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'CV_NOT_FOUND',
+  })
+  async setDefaultCv(
+    @Req() req: AuthenticatedRequest,
+    @Body('cv_id') cvId: string,
+  ) {
+    return await this.profileService.setDefaultCv(req.user.sub, cvId);
+  }
+
+  @Patch('default-matching')
+  @ApiOperation({ summary: 'Đặt một kết quả đối sánh làm mặc định hiển thị' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Cập nhật kết quả đối sánh mặc định thành công.',
+  })
+  @ApiResponse({
+    status: HttpStatus.NOT_FOUND,
+    description: 'MATCH_RECORD_NOT_FOUND',
+  })
+  async setDefaultMatching(
+    @Req() req: AuthenticatedRequest,
+    @Body('match_id') matchId: string,
+  ) {
+    return await this.profileService.setDefaultMatching(req.user.sub, matchId);
+  }
 }

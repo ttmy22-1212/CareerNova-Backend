@@ -43,11 +43,24 @@ export class ProfileService {
         },
         cvs: {
           orderBy: { uploaded_at: 'desc' },
-          take: 1,
           include: {
-            cv_skills: { include: { skill: true } },
+            cv_skills: {
+              include: {
+                skill: true,
+              },
+            },
           },
         },
+        default_cv: {
+          include: {
+            cv_skills: {
+              include: {
+                skill: true,
+              },
+            },
+          },
+        },
+        default_match: true,
       },
     });
 
@@ -75,6 +88,36 @@ export class ProfileService {
         })
       : null;
 
+    const defaultCvSummary = user.default_cv
+      ? {
+          cv_id: user.default_cv.cv_id,
+          file_name: user.default_cv.file_name,
+          file_url: user.default_cv.file_url,
+          uploaded_at: user.default_cv.uploaded_at,
+          skills: (user.default_cv.cv_skills || []).map(
+            (s) => s.skill.skill_name,
+          ),
+        }
+      : null;
+
+    let defaultMatchSummary: Record<string, any> | null = null;
+    if (user.default_match) {
+      const dm = user.default_match;
+      defaultMatchSummary = {
+        match_id: this.stringifyId(dm.match_id),
+        cv_id: this.stringifyId(dm.cv_id),
+        job_id: this.stringifyId(dm.job_id),
+        match_type: dm.match_type,
+        search_group: dm.search_group,
+        match_score: dm.match_score ? Number(dm.match_score) : null,
+        radar_data: dm.radar_data as Record<string, any>[],
+        gap_report: dm.gap_report as Record<string, any>,
+        model_version: dm.model_version,
+        created_at: dm.created_at,
+        updated_at: dm.updated_at,
+      };
+    }
+
     this.logger.log(`Successfully retrieved profile for ${user.email}`);
 
     return {
@@ -98,6 +141,15 @@ export class ProfileService {
       created_at: user.created_at
         ? new Date(user.created_at).getTime()
         : Date.now(),
+      all_cvs: user.cvs.map((cv) => ({
+        cv_id: cv.cv_id,
+        file_name: cv.file_name,
+        file_url: cv.file_url,
+        uploaded_at: cv.uploaded_at,
+        skills: cv.cv_skills.map((s) => s.skill.skill_name),
+      })),
+      default_cv: defaultCvSummary,
+      default_match: defaultMatchSummary,
       latest_cv: latestCv
         ? {
             cv_id: latestCv.cv_id,
@@ -455,5 +507,57 @@ export class ProfileService {
           : String(caughtError),
       );
     }
+  }
+
+  async setDefaultCv(userId: string, cvId: string) {
+    this.logger.log(`Setting CV ID ${cvId} as default for user ${userId}`);
+
+    // Kiểm tra xem file CV đó có tồn tại và thuộc về user này không
+    const cv = await this.prisma.userCv.findFirst({
+      where: { cv_id: cvId, user_id: userId },
+    });
+
+    if (!cv) {
+      throw new NotFoundException('CV_NOT_FOUND_OR_UNAUTHORIZED');
+    }
+
+    // Cập nhật trường mặc định trong bảng User
+    await this.prisma.user.update({
+      where: { user_id: userId },
+      data: { default_cv_id: cvId },
+    });
+
+    return { message: 'DEFAULT_CV_SET_SUCCESSFULLY', default_cv_id: cvId };
+  }
+
+  async setDefaultMatching(userId: string, matchId: string) {
+    this.logger.log(
+      `Setting Match ID ${matchId} as default for user ${userId}`,
+    );
+
+    // Kiểm tra kết quả đối sánh có tồn tại thông qua mối quan hệ gián tiếp với CV của user
+    const match = await this.prisma.cvJobMatch.findFirst({
+      where: {
+        match_id: matchId,
+        cv: {
+          user_id: userId,
+        },
+      },
+    });
+
+    if (!match) {
+      throw new NotFoundException('MATCH_RECORD_NOT_FOUND_OR_UNAUTHORIZED');
+    }
+
+    // Cập nhật trường kết quả mặc định trong bảng User
+    await this.prisma.user.update({
+      where: { user_id: userId },
+      data: { default_match_id: matchId },
+    });
+
+    return {
+      message: 'DEFAULT_MATCHING_SET_SUCCESSFULLY',
+      default_match_id: matchId,
+    };
   }
 }
