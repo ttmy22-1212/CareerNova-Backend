@@ -12,6 +12,8 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SalaryInsightsModule } from './modules/salary-insights/salary-insights.module';
 import { MarketDashboardModule } from './modules/market-dashboard/market-dashboard.module';
 import { MatchingModule } from './modules/matching/matching.module';
+import { PersonalDashboardModule } from './modules/personal-dashboard/personal-dashboard.module';
+import { SkillGapModule } from './modules/skill-gap/skill-gap.module';
 
 @Module({
   imports: [
@@ -26,6 +28,8 @@ import { MatchingModule } from './modules/matching/matching.module';
     SalaryInsightsModule,
     MarketDashboardModule,
     MatchingModule,
+    PersonalDashboardModule,
+    SkillGapModule,
   ],
   controllers: [AppController],
   providers: [AppService],

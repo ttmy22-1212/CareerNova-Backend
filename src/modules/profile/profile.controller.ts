@@ -25,6 +25,10 @@ import { ChangePasswordDto } from './dto/change-profile.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 import { UpdateOnboardingProgressDto } from './dto/update-onboarding-progress.dto';
 import { SaveJobDto } from './dto/save-job.dto';
+import {
+  SetDefaultCvDto,
+  SetDefaultMatchingDto,
+} from './dto/update-default.dto';
 
 @ApiTags('Profile')
 @ApiBearerAuth('JWT-auth')
@@ -187,9 +191,9 @@ export class ProfileController {
   })
   async setDefaultCv(
     @Req() req: AuthenticatedRequest,
-    @Body('cv_id') cvId: string,
+    @Body() dto: SetDefaultCvDto,
   ) {
-    return await this.profileService.setDefaultCv(req.user.sub, cvId);
+    return await this.profileService.setDefaultCv(req.user.sub, dto.cv_id);
   }
 
   @Patch('default-matching')
@@ -204,8 +208,11 @@ export class ProfileController {
   })
   async setDefaultMatching(
     @Req() req: AuthenticatedRequest,
-    @Body('match_id') matchId: string,
+    @Body() dto: SetDefaultMatchingDto,
   ) {
-    return await this.profileService.setDefaultMatching(req.user.sub, matchId);
+    return await this.profileService.setDefaultMatching(
+      req.user.sub,
+      dto.match_id,
+    );
   }
 }

@@ -8,35 +8,37 @@ datasource db {
 }
 
 model User {
-  user_id              String             @id @default(uuid()) @db.Uuid
-  full_name            String?            @db.VarChar(255)
-  email                String?            @unique @db.VarChar(255)
-  password_hash        String?
-  avatar_url           String?
-  role                 String             @default("student") @db.VarChar(50)
-  created_at           DateTime?          @default(now()) @db.Timestamp(6)
-  updated_at           DateTime?          @default(now()) @db.Timestamp(6)
-  is_active            Boolean            @default(false)
-  verify_token         String?
-  verify_token_expires DateTime?          @db.Timestamp(6)
-  school               String?            @db.VarChar(255)
-  major                String?            @db.VarChar(255)
-  current_year         Int?
-  orientation          String?            @db.VarChar(255)
-  objective            String?            @db.VarChar(255)
-  target_salary        Int?
-  prefer_remote        Boolean?
-  current_step         Int                @default(1)
-  onboarding_completed Boolean            @default(false)
-  notifications        Notification[]
-  saved_jobs           SavedJob[]
-  auth_providers       UserAuthProvider[]
-  cvs                  UserCv[]
-  default_cv_id        String?   @unique @db.Uuid
-  default_cv           UserCv?   @relation("UserDefaultCv", fields: [default_cv_id], references: [cv_id], onDelete: SetNull)
+  user_id                   String             @id @default(uuid()) @db.Uuid
+  full_name                 String?            @db.VarChar(255)
+  email                     String?            @unique @db.VarChar(255)
+  password_hash             String?
+  avatar_url                String?
+  role                      String             @default("student") @db.VarChar(50)
+  created_at                DateTime?          @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?          @default(now()) @db.Timestamp(6)
+  is_active                 Boolean            @default(false)
+  verify_token              String?
+  verify_token_expires      DateTime?          @db.Timestamp(6)
+  school                    String?            @db.VarChar(255)
+  major                     String?            @db.VarChar(255)
+  current_year              Int?
+  orientation               String?            @db.VarChar(255)
+  objective                 String?            @db.VarChar(255)
+  target_salary             Int?
+  prefer_remote             Boolean?
+  current_step              Int                @default(1)
+  onboarding_completed      Boolean            @default(false)
+  notifications             Notification[]
+  saved_jobs                SavedJob[]
+  auth_providers            UserAuthProvider[]
+  cvs                       UserCv[]
+  
+  default_cv_id             String?            @unique @db.Uuid
+  default_cv                UserCv?            @relation("UserDefaultCv", fields: [default_cv_id], references: [cv_id], onDelete: SetNull)
 
-  default_match_id     String?   @unique @db.Uuid
-  default_match        CvJobMatch? @relation("UserDefaultMatch", fields: [default_match_id], references: [match_id], onDelete: SetNull)
+  default_match_id          String?            @unique @db.Uuid
+  default_match             CvJobMatch?        @relation("UserDefaultMatch", fields: [default_match_id], references: [match_id], onDelete: SetNull)
+  allow_default_cv_matching Boolean            @default(false)
 
   @@map("users")
 }
@@ -54,6 +56,7 @@ model UserAuthProvider {
   user                User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@unique([provider, provider_user_id])
+  @@index([user_id], map: "idx_user_auth_providers_user_id")
   @@map("user_auth_providers")
 }
 
@@ -74,24 +77,11 @@ model UserCv {
   @@map("user_cvs")
 }
 
-model Skill {
-  skill_id                Int                   @id @default(autoincrement())
-  skill_name              String                @unique @db.VarChar(255)
-  category                String?               @db.VarChar(255)
-  created_at              DateTime?             @default(now()) @db.Timestamp(6)
-  type                    String?               @db.VarChar(100)
-  updated_at              DateTime?             @default(now()) @db.Timestamp(6)
-  job_group_skill_weights JobGroupSkillWeight[]
-  job_skills              JobSkill[]
-  user_cv_skills          UserCvSkill[]
-
-  @@map("skills")
-}
-
 model UserCvSkill {
   cv_id      String    @db.Uuid
   skill_id   Int
   created_at DateTime? @default(now()) @db.Timestamp(6)
+  raw_skill  String?   @db.VarChar(255) // BỔ SUNG TỪ SQL
   cv         UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
   skill      Skill     @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
 
@@ -161,7 +151,7 @@ model Job {
   cv_matches                 CvJobMatch[]
   job_benefits               JobBenefit[]
   job_skills                 JobSkill[]
-  company                    Company?     @relation(fields: [company_id], references: [company_id])
+  company                    Company?     @relation(fields: [company_id], references: [company_id], onDelete: SetNull)
   salaries                   Salary[]
   saved_by                   SavedJob[]
 
@@ -173,6 +163,7 @@ model Job {
   @@index([search_group], map: "idx_jobs_search_group")
   @@index([source_name], map: "idx_jobs_source_name")
   @@index([title], map: "idx_jobs_title")
+  @@index([skills_desc], map: "idx_jobs_skills_search", type: Gin) 
   @@map("jobs")
 }
 
@@ -190,12 +181,32 @@ model Salary {
   @@map("salaries")
 }
 
+model Skill {
+  skill_id                Int                   @id @default(autoincrement())
+  skill_name              String                @unique @db.VarChar(255)
+  category                String?               @db.VarChar(255)
+  created_at              DateTime?             @default(now()) @db.Timestamp(6)
+  type                    String?               @db.VarChar(100)
+  updated_at              DateTime?             @default(now()) @db.Timestamp(6)
+  job_group_skill_weights JobGroupSkillWeight[]
+  job_skills              JobSkill[]
+  user_cv_skills          UserCvSkills[]
+  unmatched_skills        UnmatchedSkill[]      
+
+  @@map("skills")
+}
+
 model JobSkill {
-  job_id      BigInt
-  skill_id    Int
-  is_inferred Boolean? @default(false)
-  job         Job      @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
-  skill       Skill    @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
+  job_id           BigInt
+  skill_id         Int
+  is_inferred      Boolean? @default(false)
+  reason           String?  @db.VarChar(50)
+  model_name       String?  @db.VarChar(100)
+  similarity_score Decimal? @db.Decimal(4, 3)
+  lib_version      String?  @db.VarChar(20)
+  raw_skill_name   String?  @db.VarChar(255)
+  job              Job      @relation(fields: [job_id], references: [job_id], onDelete: Cascade)
+  skill            Skill    @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
 
   @@id([job_id, skill_id])
   @@map("job_skills")
@@ -233,20 +244,20 @@ model JobGroupSkillWeight {
 }
 
 model CvJobMatch {
-  match_id      String    @id @default(uuid()) @db.Uuid
-  cv_id         String    @db.Uuid
-  match_type    String    @db.VarChar(50)
-  search_group  String?   @db.VarChar(100)
-  job_id        BigInt?
-  match_score   Decimal?  @db.Decimal(5, 2)
-  radar_data    Json?
-  gap_report    Json?
-  model_version String?   @db.VarChar(100)
-  created_at    DateTime? @default(now()) @db.Timestamp(6)
-  updated_at    DateTime? @default(now()) @db.Timestamp(6)
-  cv            UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
-  job           Job?      @relation(fields: [job_id], references: [job_id])
-  default_for_user User?       @relation("UserDefaultMatch")
+  match_id         String    @id @default(uuid()) @db.Uuid
+  cv_id            String    @db.Uuid
+  match_type       String    @db.VarChar(50)
+  search_group     String?   @db.VarChar(100)
+  job_id           BigInt?
+  match_score      Decimal?  @db.Decimal(5, 2)
+  radar_data       Json?
+  gap_report       Json?
+  model_version    String?   @db.VarChar(100)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+  cv               UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
+  job              Job?      @relation(fields: [job_id], references: [job_id], onDelete: SetNull)
+  default_for_user User?     @relation("UserDefaultMatch")
 
   @@index([created_at], map: "idx_cv_job_matches_created_at")
   @@index([cv_id], map: "idx_cv_job_matches_cv_id")
@@ -254,6 +265,49 @@ model CvJobMatch {
   @@index([match_type], map: "idx_cv_job_matches_match_type")
   @@index([search_group], map: "idx_cv_job_matches_search_group")
   @@map("cv_job_matches")
+}
+
+model SearchGroupKeyword {
+  id        Int    @id @default(autoincrement())
+  group_key String @db.VarChar(255)
+  keyword   String @unique @db.VarChar(255)
+
+  @@index([keyword], map: "idx_search_group_keywords_keyword")
+  @@map("search_group_keywords")
+}
+
+model UnmatchedSkill {
+  unmatched_id             Int                    @id @default(autoincrement())
+  raw_skill_name           String                 @unique @db.VarChar(255)
+  occurrence_count         Int?                   @default(1)
+  max_similarity_score     Decimal?               @db.Decimal(4, 3)
+  analysis_type            String?                @db.VarChar(50)
+  first_seen               DateTime?              @default(now()) @db.Timestamp(6)
+  last_seen                DateTime?              @default(now()) @db.Timestamp(6)
+  top_candidate_skill_id   Int?
+  top_candidate_skill_name String?                @db.VarChar(255)
+  
+  candidate_skill          Skill?                 @relation(fields: [top_candidate_skill_id], references: [skill_id], onDelete: SetNull)
+  sources                  UnmatchedSkillSource[]
+
+  @@index([analysis_type], map: "idx_unmatched_skills_analysis_type")
+  @@index([raw_skill_name], map: "idx_unmatched_skills_raw_name")
+  @@map("unmatched_skills")
+}
+
+model UnmatchedSkillSource {
+  source_id            BigInt
+  unmatched_id         Int
+  source_type          String         @db.VarChar(50)
+  occurrence_count     Int?           @default(1)
+  max_similarity_score Decimal?       @db.Decimal(4, 3)
+  first_seen           DateTime?      @default(now()) @db.Timestamp(6)
+  last_seen            DateTime?      @default(now()) @db.Timestamp(6)
+  
+  unmatched_skill      UnmatchedSkill @relation(fields: [unmatched_id], references: [unmatched_id], onDelete: Cascade)
+
+  @@id([source_id, unmatched_id, source_type])
+  @@map("unmatched_skill_sources")
 }
 
 model NotificationTemplate {
