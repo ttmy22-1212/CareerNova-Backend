@@ -512,7 +512,6 @@ export class ProfileService {
   async setDefaultCv(userId: string, cvId: string) {
     this.logger.log(`Setting CV ID ${cvId} as default for user ${userId}`);
 
-    // Kiểm tra xem file CV đó có tồn tại và thuộc về user này không
     const cv = await this.prisma.userCv.findFirst({
       where: { cv_id: cvId, user_id: userId },
     });
@@ -521,13 +520,27 @@ export class ProfileService {
       throw new NotFoundException('CV_NOT_FOUND_OR_UNAUTHORIZED');
     }
 
-    // Cập nhật trường mặc định trong bảng User
-    await this.prisma.user.update({
-      where: { user_id: userId },
-      data: { default_cv_id: cvId },
+    const highestMatch = await this.prisma.cvJobMatch.findFirst({
+      where: { cv_id: cvId },
+      orderBy: { match_score: 'desc' },
+      select: { match_id: true },
     });
 
-    return { message: 'DEFAULT_CV_SET_SUCCESSFULLY', default_cv_id: cvId };
+    const defaultMatchId = highestMatch ? highestMatch.match_id : null;
+
+    await this.prisma.user.update({
+      where: { user_id: userId },
+      data: {
+        default_cv_id: cvId,
+        default_match_id: defaultMatchId,
+      },
+    });
+
+    return {
+      message: 'DEFAULT_CV_SET_SUCCESSFULLY',
+      default_cv_id: cvId,
+      default_match_id: defaultMatchId,
+    };
   }
 
   async setDefaultMatching(userId: string, matchId: string) {

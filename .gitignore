@@ -59,3 +59,5 @@ report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 full_dump.sql
 seed_data.sql
 schema.sql
+/prisma/seed.sql
+/prisma/seed.ts

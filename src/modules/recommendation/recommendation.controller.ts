@@ -1,0 +1,46 @@
+import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { RecommendationService } from './recommendation.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  RecommendedJobDto,
+  SavedReportItemDto,
+} from './dto/recommendation.dto';
+import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
+
+@ApiTags('Lộ trình phát triển (Recommendation)')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(JwtAuthGuard)
+@Controller('recommendation')
+export class RecommendationController {
+  constructor(private readonly recommendationService: RecommendationService) {}
+
+  @Get('top-jobs')
+  @ApiOperation({
+    summary: 'Lấy top 5 việc làm gợi ý trong vòng 1 tháng trở lại đây',
+  })
+  @ApiResponse({ status: 200, type: [RecommendedJobDto] })
+  async getTopJobs(@Req() req: AuthenticatedRequest) {
+    const userId = req.user.sub;
+    const data =
+      await this.recommendationService.getRecentRecommendedJobs(userId);
+    return { data };
+  }
+
+  @Get('saved-reports')
+  @ApiOperation({
+    summary:
+      'Lấy danh sách tất cả các lượt so khớp (Báo cáo) đã thực hiện bấm lưu để xem trực tiếp',
+  })
+  @ApiResponse({ status: 200, type: [SavedReportItemDto] })
+  async getSavedReports(@Req() req: AuthenticatedRequest) {
+    const userId = req.user.sub;
+    const data = await this.recommendationService.getSavedReportsList(userId);
+    return { data };
+  }
+}

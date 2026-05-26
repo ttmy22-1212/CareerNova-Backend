@@ -6,6 +6,8 @@ export class SetDefaultCvDto {
     description: 'ID của CV cần đặt làm mặc định',
     example: 'cv_uuid_12345',
   })
+  @IsString()
+  @IsNotEmpty()
   cv_id: string;
 }
 

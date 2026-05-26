@@ -15,7 +15,11 @@ import {
 } from '@nestjs/swagger';
 import { MatchingService } from './matching.service';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
-import { AnalyzeCvDto, CheckHistoryResponseDto } from './dto/matching.dto';
+import {
+  AnalyzeCvDto,
+  CheckHistoryResponseDto,
+  CvJobMatchResultDto,
+} from './dto/matching.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('CV Matching')
@@ -49,7 +53,7 @@ export class MatchingController {
 
   @Post('analyze')
   @ApiOperation({
-    summary: 'Kích hoạt thuật toán đối sánh CV với nhóm công việc',
+    summary: 'Kích hoạt thuật toán đối sánh CV ',
   })
   @ApiResponse({
     status: 201,
@@ -57,6 +61,21 @@ export class MatchingController {
   })
   async analyzeCv(@Body() dto: AnalyzeCvDto, @Req() req: AuthenticatedRequest) {
     const data = await this.matchingService.analyzeCv(dto, req.user.sub);
+    return { data };
+  }
+
+  @Get('history')
+  @ApiOperation({
+    summary: 'Lấy tất cả lịch sử đối sánh CV của người dùng hiện tại',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Danh sách lịch sử đối sánh thành công',
+    type: [CvJobMatchResultDto],
+  })
+  async getAllMatches(@Req() req: AuthenticatedRequest) {
+    const userId = req.user.sub;
+    const data = await this.matchingService.getAllMatches(userId);
     return { data };
   }
 

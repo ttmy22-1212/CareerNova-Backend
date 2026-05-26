@@ -1,66 +1,90 @@
 import { ApiProperty } from '@nestjs/swagger';
 
-export class SkillGapScoreCardDto {
-  @ApiProperty({
-    example: 69,
-    description: 'Phần trăm độ khớp CV tổng quan (Card 1)',
-  })
+export class SkillGapStatisticsDto {
+  @ApiProperty({ example: 78, description: 'Độ khớp CV tổng quan (%)' })
   match_score: number;
-}
-
-export class SkillGapMissingPercentCardDto {
-  @ApiProperty({
-    example: 40,
-    description:
-      'Phần trăm kĩ năng còn thiếu trên tổng số kĩ năng ngành (Card 2)',
-  })
-  missing_percentage: number;
-}
-
-export class SkillGapRadarPointDto {
-  @ApiProperty({ example: 'TypeScript', description: 'Tên kỹ năng' })
-  skill_name: string;
-
-  @ApiProperty({ example: 92, description: 'Tỷ lệ thành thạo của User (%)' })
-  user_score: number;
-
-  @ApiProperty({ example: 100, description: 'Mức độ thị trường yêu cầu (%)' })
-  market_score: number;
-}
-
-export class SkillGapDetailLineDto {
-  @ApiProperty({ example: 'Docker', description: 'Tên kỹ năng' })
-  skill_name: string;
 
   @ApiProperty({
-    example: 'Missing',
-    description: 'Trạng thái: Proficient hoặc Missing',
+    example: 3,
+    description: 'Số kỹ năng thiếu hụt mức độ Cốt lõi (Trọng số > 50%)',
   })
-  status: string;
+  core_gaps_count: number;
 
   @ApiProperty({
-    example: 75,
-    description: 'Mức độ yêu cầu của thị trường (%)',
+    example: 5,
+    description: 'Số kỹ năng thiếu hụt mức độ Ưu tiên (Trọng số 20% - 50%)',
   })
-  market_rate: number;
-
-  @ApiProperty({ example: 0, description: 'Mức độ hiện tại của User (%)' })
-  user_rate: number;
+  priority_gaps_count: number;
 }
 
-export class SkillGapCategoryBreakdownDto {
-  @ApiProperty({ example: 'DevOps', description: 'Tên danh mục kĩ năng' })
+export class CategoryGapDto {
+  @ApiProperty({ example: 'Backend Development' })
   category: string;
 
   @ApiProperty({
-    example: 'Cốt lõi',
-    description: 'Nhãn ưu tiên cao nhất của danh mục',
+    example: 4.3,
+    description: 'Điểm gap chênh lệch trung bình/tổng của category',
   })
-  label: string;
+  gap_score: number;
+}
+
+export class RadarSkillPointDto {
+  @ApiProperty({ example: 'Docker' })
+  skill_name: string;
+
+  @ApiProperty({ example: 80, description: 'Điểm thị trường yêu cầu (%)' })
+  market_score: number;
+
+  @ApiProperty({ example: 20, description: 'Điểm User hiện có (%)' })
+  user_score: number;
+}
+
+export class SkillBreakdownItemDto {
+  @ApiProperty({ example: 101 })
+  skill_id: number;
+
+  @ApiProperty({ example: 'React' })
+  skill_name: string;
+
+  @ApiProperty({ example: 92, description: 'Mức độ hiện tại của Bạn (%)' })
+  user_rate: number;
 
   @ApiProperty({
-    type: [SkillGapDetailLineDto],
-    description: 'Danh sách chi tiết kĩ năng bên trong',
+    example: 75,
+    description: 'Mức độ yêu cầu của Thị trường (%)',
   })
-  skills: SkillGapDetailLineDto[];
+  market_rate: number;
+
+  @ApiProperty({ example: 'Proficient', enum: ['Proficient', 'Missing'] })
+  status: 'Proficient' | 'Missing';
+}
+
+// --- CẤU TRÚC CHO DANH MỤC CHA (HÀNG ĐỘNG TRÊN UI) ---
+export class CategoryBreakdownDto {
+  @ApiProperty({ example: 'Frontend' })
+  category_name: string;
+
+  @ApiProperty({
+    example: '-13pt gap',
+    description: 'Chuỗi hiển thị điểm gap trên nhãn UI',
+  })
+  gap_label: string;
+
+  @ApiProperty({
+    example: 88,
+    description: 'Tỷ lệ trung bình hiện tại của Bạn (%)',
+  })
+  user_rate_avg: number;
+
+  @ApiProperty({
+    example: 75,
+    description: 'Tỷ lệ trung bình của Thị trường (%)',
+  })
+  market_rate_avg: number;
+
+  @ApiProperty({
+    type: [SkillBreakdownItemDto],
+    description: 'Danh sách kỹ năng con khi bấm mở rộng',
+  })
+  skills: SkillBreakdownItemDto[];
 }

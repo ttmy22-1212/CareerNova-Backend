@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, IsUUID } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  IsUUID,
+} from 'class-validator';
 
 export class AnalyzeCvDto {
   @ApiProperty({
@@ -12,11 +18,22 @@ export class AnalyzeCvDto {
 
   @ApiProperty({
     example: 'Senior React Developer',
-    description: 'Tên nhóm công việc mục tiêu',
+    description: 'Tên nhóm công việc mục tiêu (Dùng cho đối sánh theo Group)',
+    required: false,
   })
   @IsString()
-  @IsNotEmpty()
-  search_group: string;
+  @IsOptional()
+  search_group?: string;
+
+  @ApiProperty({
+    example: 'https://itviec.com/it-jobs/...',
+    description:
+      'Đường dẫn chi tiết bài đăng tuyển dụng (Dùng cho đối sánh theo URL)',
+    required: false,
+  })
+  @IsUrl()
+  @IsOptional()
+  job_url?: string;
 }
 
 export class CheckHistoryResponseDto {

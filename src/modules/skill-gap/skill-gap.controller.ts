@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -8,10 +8,10 @@ import {
 import { SkillGapService } from './skill-gap.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
-  SkillGapScoreCardDto,
-  SkillGapMissingPercentCardDto,
-  SkillGapRadarPointDto,
-  SkillGapCategoryBreakdownDto,
+  SkillGapStatisticsDto,
+  CategoryGapDto,
+  RadarSkillPointDto,
+  CategoryBreakdownDto,
 } from './dto/skill-gap.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 
@@ -22,46 +22,56 @@ import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 export class SkillGapController {
   constructor(private readonly skillGapService: SkillGapService) {}
 
-  @Get('card-score')
-  @ApiOperation({ summary: 'Card 1: Điểm số phần trăm độ khớp CV tổng quan' })
-  @ApiResponse({ status: 200, type: SkillGapScoreCardDto })
-  async getScoreCard(@Req() req: AuthenticatedRequest) {
+  @Get('statistics')
+  @ApiOperation({
+    summary: 'Lấy dữ liệu các thẻ thống kê tổng quan của trang Skill Gap',
+  })
+  @ApiResponse({ status: 200, type: SkillGapStatisticsDto })
+  async getStatistics(@Req() req: AuthenticatedRequest) {
     const userId = req.user.sub;
-    const data = await this.skillGapService.getMatchScoreCard(userId);
+    const data = await this.skillGapService.getSkillGapStatistics(userId);
     return { data };
   }
 
-  @Get('card-missing-percentage')
+  @Get('category-gaps')
   @ApiOperation({
     summary:
-      'Card 2: Tỷ lệ % kĩ năng còn thiếu hụt so với tổng số kĩ năng ngành',
+      'Lấy dữ liệu biểu đồ so sánh số lượng kỹ năng thiếu theo danh mục (Giống Dashboard)',
   })
-  @ApiResponse({ status: 200, type: SkillGapMissingPercentCardDto })
-  async getMissingPercentCard(@Req() req: AuthenticatedRequest) {
+  @ApiResponse({ status: 200, type: [CategoryGapDto] })
+  async getCategoryGaps(@Req() req: AuthenticatedRequest) {
     const userId = req.user.sub;
-    const data = await this.skillGapService.getMissingPercentCard(userId);
+    const data = await this.skillGapService.getCategoryGapsData(userId);
     return { data };
   }
 
-  @Get('radar-chart')
+  @Get('skills-radar')
   @ApiOperation({
-    summary: 'Component 3: Bộ khung dữ liệu vẽ Radar Chart kĩ năng',
+    summary:
+      'Lấy dữ liệu biểu đồ Radar lọc theo Category truyền vào (Giống Dashboard)',
   })
-  @ApiResponse({ status: 200, type: [SkillGapRadarPointDto] })
-  async getRadarChart(@Req() req: AuthenticatedRequest) {
+  @ApiResponse({ status: 200, type: [RadarSkillPointDto] })
+  async getSkillsRadar(
+    @Req() req: AuthenticatedRequest,
+    @Query('category') category: string,
+  ) {
     const userId = req.user.sub;
-    const data = await this.skillGapService.getSkillsRadarData(userId);
+    const data = await this.skillGapService.getSkillsRadarData(
+      userId,
+      category,
+    );
     return { data };
   }
 
-  @Get('detailed-breakdown')
+  @Get('skills-breakdown')
   @ApiOperation({
-    summary: 'Component 4: Bảng phân rã chi tiết danh mục và kĩ năng con',
+    summary:
+      'Lấy danh sách TOÀN BỘ kỹ năng trải phẳng (Detailed Breakdown) không cần lọc category',
   })
-  @ApiResponse({ status: 200, type: [SkillGapCategoryBreakdownDto] })
-  async getDetailedBreakdown(@Req() req: AuthenticatedRequest) {
+  @ApiResponse({ status: 200, type: [CategoryBreakdownDto] })
+  async getSkillsBreakdown(@Req() req: AuthenticatedRequest) {
     const userId = req.user.sub;
-    const data = await this.skillGapService.getDetailedBreakdownData(userId);
+    const data = await this.skillGapService.getSkillsBreakdownData(userId);
     return { data };
   }
 }

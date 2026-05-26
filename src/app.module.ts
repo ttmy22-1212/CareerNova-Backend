@@ -14,6 +14,7 @@ import { MarketDashboardModule } from './modules/market-dashboard/market-dashboa
 import { MatchingModule } from './modules/matching/matching.module';
 import { PersonalDashboardModule } from './modules/personal-dashboard/personal-dashboard.module';
 import { SkillGapModule } from './modules/skill-gap/skill-gap.module';
+import { RecommendationModule } from './modules/recommendation/recommendation.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SkillGapModule } from './modules/skill-gap/skill-gap.module';
     MatchingModule,
     PersonalDashboardModule,
     SkillGapModule,
+    RecommendationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

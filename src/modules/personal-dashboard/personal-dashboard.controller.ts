@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -55,9 +55,14 @@ export class PersonalDashboardController {
     summary: 'Lấy dữ liệu biểu đồ Radar cụ thể (Tab Kỹ năng - Bên trái)',
   })
   @ApiResponse({ status: 200, type: [RadarSkillPointDto] })
-  async getSkillsRadar(@Req() req: AuthenticatedRequest) {
-    const userId = req.user.sub;
-    const data = await this.dashboardService.getSkillsRadarData(userId);
+  async getSkillsRadar(
+    @Req() req: AuthenticatedRequest,
+    @Query('category') category: string,
+  ) {
+    const data = await this.dashboardService.getSkillsRadarData(
+      req.user.sub,
+      category,
+    );
     return { data };
   }
 
