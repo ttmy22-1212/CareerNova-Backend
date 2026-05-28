@@ -700,7 +700,13 @@ export class MatchingService {
         throw new NotFoundException('Match analysis record not found');
       }
 
-      return matchDetail as CvJobMatchResultDto;
+      const safeData = JSON.parse(
+        JSON.stringify(matchDetail, (_key, value: unknown) =>
+          typeof value === 'bigint' ? value.toString() : value,
+        ),
+      ) as unknown as CvJobMatchResultDto;
+
+      return safeData;
     } catch (error: unknown) {
       this.handleError(error, 'Get Match Detail');
       throw new BadRequestException('Could not retrieve match details');

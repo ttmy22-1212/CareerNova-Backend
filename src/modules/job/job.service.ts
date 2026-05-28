@@ -308,4 +308,35 @@ export class JobService {
       data: skills,
     };
   }
+
+  async getCategories(): Promise<string[]> {
+    try {
+      this.logger.log('Fetching unique category list from master skills table');
+
+      // Truy vấn cơ sở dữ liệu và chỉ lấy các giá trị category khác nhau (Distinct)
+      const skills = await this.prisma.skill.findMany({
+        where: {
+          category: {
+            not: null, // Loại bỏ các kỹ năng không được gán category ngay từ câu lệnh DB
+          },
+        },
+        select: {
+          category: true,
+        },
+        distinct: ['category'],
+        orderBy: {
+          category: 'asc', // Sắp xếp theo thứ tự bảng chữ cái từ A-Z cho đẹp UI
+        },
+      });
+
+      // Map mảng đối tượng thành mảng chuỗi phẳng gởi về Frontend render
+      return skills
+        .map((s) => s.category)
+        .filter((cat): cat is string => !!cat && cat.trim() !== '');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Failed to fetch skill categories: ${message}`);
+      return [];
+    }
+  }
 }

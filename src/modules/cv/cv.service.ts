@@ -121,12 +121,15 @@ export class CvService {
     return await this.prisma.$transaction(async (tx) => {
       let targetCvId = cv_id;
 
-      // nếu user không upload file thật (cv_id là null)
       if (!targetCvId) {
+        const now = new Date();
+
+        const formattedDate = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}_${String(now.getHours()).padStart(2, '0')}h${String(now.getMinutes()).padStart(2, '0')}`;
+
         const virtualCv = await tx.userCv.create({
           data: {
             user_id: userId,
-            file_name: 'Onboarding_Virtual_Profile.pdf',
+            file_name: `Onboarding_Virtual_Profile_${formattedDate}.pdf`,
             file_url: 'internal://onboarding_virtual_cv',
             extracted_text:
               'Virtual CV generated from onboarding manually selected skills.',

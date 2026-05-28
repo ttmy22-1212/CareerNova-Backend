@@ -53,6 +53,20 @@ export class JobController {
     return await this.jobService.getSkills(query);
   }
 
+  @Get('categories')
+  @ApiOperation({
+    summary: 'Lấy danh sách tất cả các danh mục kỹ năng (Unique Categories)',
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description:
+      'Danh sách các danh mục kỹ năng độc nhất dưới dạng mảng chuỗi.',
+    type: [String],
+  })
+  async getCategories() {
+    return await this.jobService.getCategories();
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Lấy chi tiết một công việc' })
   @ApiResponse({

@@ -13,7 +13,7 @@ import {
 } from './dto/recommendation.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 
-@ApiTags('Lộ trình phát triển (Recommendation)')
+@ApiTags('Recommendation')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
 @Controller('recommendation')

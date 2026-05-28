@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   DashboardBannerDto,
@@ -203,6 +208,34 @@ export class PersonalDashboardService {
     }
   }
 
+  private async getDefaultMatchOrThrow(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { user_id: userId },
+      select: { default_match_id: true },
+    });
+
+    if (!user || !user.default_match_id) {
+      throw new NotFoundException(
+        'Vui lòng kích hoạt lượt matching mặc định để xem phân tích kỹ năng.',
+      );
+    }
+
+    const match = await this.prisma.cvJobMatch.findUnique({
+      where: { match_id: user.default_match_id },
+      include: {
+        job: { select: { title: true } },
+      },
+    });
+
+    if (!match) {
+      throw new NotFoundException(
+        'Không tìm thấy dữ liệu phân tích matching mặc định tương ứng.',
+      );
+    }
+
+    return match;
+  }
+
   async getSkillsRadarData(
     userId: string,
     category: string,
@@ -212,96 +245,120 @@ export class PersonalDashboardService {
         `Fetching skills radar chart data for category "${category}" and user: ${userId}`,
       );
 
-      const user = await this.prisma.user.findUnique({
-        where: { user_id: userId },
-        select: { default_match_id: true },
-      });
+      const match = await this.getDefaultMatchOrThrow(userId);
 
-      if (!user || !user.default_match_id) return [];
-
-      const defaultMatch = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: user.default_match_id },
-        select: {
-          radar_data: true,
-          gap_report: true,
-          search_group: true,
-          job_id: true,
-          match_type: true,
-        },
-      });
-
-      if (!defaultMatch) return [];
-
-      // 1. Lấy danh sách kỹ năng gốc thuộc nhóm ngành/Job và phải lọc đúng theo CATEGORY truyền vào
+      // 1. Lấy base skills theo category
       let baseSkills: Array<{
         skill_id: number;
         skill_name: string;
         market_weight: number;
       }> = [];
 
-      if (defaultMatch.match_type === 'cv_job' && defaultMatch.job_id) {
-        // Luồng Job cụ thể: Lấy các skill của Job thuộc category này
+      /**
+       * CV_JOB FLOW
+       */
+      if (match.match_type === 'cv_job' && match.job_id) {
         const jobSkills = await this.prisma.jobSkill.findMany({
           where: {
-            job_id: defaultMatch.job_id,
-            skill: { category: category }, // Lọc theo danh mục truyền vào từ Front-end
+            job_id: match.job_id,
+            skill: {
+              category: {
+                equals: category,
+                mode: 'insensitive',
+              },
+            },
           },
-          include: { skill: true },
+          include: {
+            skill: true,
+          },
         });
+
         baseSkills = jobSkills.map((js) => ({
           skill_id: js.skill_id,
           skill_name: js.skill.skill_name,
-          market_weight: 1.0,
+          market_weight: Number(js.similarity_score || 1),
         }));
-      } else if (defaultMatch.search_group) {
-        // Luồng Search Group Benchmark: Lấy cấu hình weights ngành thuộc category này
-        const groupWeights = await this.prisma.jobGroupSkillWeight.findMany({
+      } else if (match.search_group) {
+        /**
+         * SEARCH_GROUP FLOW
+         */
+        const groupSkills = await this.prisma.jobGroupSkillWeight.findMany({
           where: {
-            search_group: defaultMatch.search_group,
-            skill: { category: category }, // Lọc theo danh mục truyền vào từ Front-end
+            search_group: match.search_group,
+            skill: {
+              category: {
+                equals: category,
+                mode: 'insensitive',
+              },
+            },
           },
-          include: { skill: true },
+          include: {
+            skill: true,
+          },
         });
-        baseSkills = groupWeights.map((gw) => ({
+
+        baseSkills = groupSkills.map((gw) => ({
           skill_id: gw.skill_id,
           skill_name: gw.skill.skill_name,
           market_weight: Number(gw.weight_wi),
         }));
       }
 
-      if (baseSkills.length === 0) return [];
+      if (baseSkills.length === 0) {
+        return [];
+      }
 
-      // 2. Lấy dữ liệu phân tích kỹ năng thực tế của người dùng từ DB
-      const matchedSkillsList =
-        (defaultMatch.radar_data as unknown as MatchedSkillDetail[]) || [];
-      const gapReport =
-        defaultMatch.gap_report as unknown as GapReportStructure;
-      const partialSkills =
-        (gapReport && gapReport.partially_matched_skills) || [];
+      // 2. Parse gap report
+      const gapReport = (match.gap_report as unknown as GapReportStructure) || {
+        partially_matched_skills: [],
+        missing_skills: [],
+      };
 
-      // 3. Map điểm số chi tiết của từng kĩ năng thuộc danh mục này
+      const partialSkills = gapReport.partially_matched_skills || [];
+
+      const missingSkills = gapReport.missing_skills || [];
+
+      // 3. Build radar data
       return baseSkills.map((bs) => {
-        const skillId = bs.skill_id;
-        let userScore = 0;
+        const marketScore = Math.round(bs.market_weight * 100);
 
-        const matchedItem = matchedSkillsList.find(
-          (s) => s.skill_id === skillId,
+        let userScore = marketScore;
+
+        const missingItem = missingSkills.find(
+          (m) => Number(m.skill_id) === Number(bs.skill_id),
         );
-        const partialItem = partialSkills.find((p) => p.skill_id === skillId);
 
-        if (matchedItem) {
-          userScore = Math.round((matchedItem.similarity || 0) * 100);
+        const partialItem = partialSkills.find(
+          (p) => Number(p.skill_id) === Number(bs.skill_id),
+        );
+
+        /**
+         * Missing skill
+         */
+        if (missingItem) {
+          userScore = 0;
         } else if (partialItem) {
-          userScore = Math.round((partialItem.similarity || 0) * 100);
+          /**
+           * Partial skill
+           */
+          const similarity =
+            typeof partialItem.similarity === 'number'
+              ? partialItem.similarity
+              : 0;
+
+          userScore = Math.round(similarity * marketScore);
         }
 
+        /**
+         * Else:
+         * fully matched
+         * => userScore = marketScore
+         */
+
         return {
-          skill_name: bs.skill_name, // Lúc này hiển thị tên từng kỹ năng cụ thể lên các góc của Radar
+          skill_name: bs.skill_name,
           user_score: userScore,
-          market_score:
-            Math.round(bs.market_weight * 100) > 0
-              ? Math.round(bs.market_weight * 100)
-              : 70,
+          market_score: marketScore,
         };
       });
     } catch (error: unknown) {
@@ -423,11 +480,16 @@ export class PersonalDashboardService {
       if (!defaultMatch || !defaultMatch.search_group) return [];
 
       // 1. Thử tìm từ lịch sử so khớp CV cụ thể với các job trong cùng search_group
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
       const matchedJobs = await this.prisma.cvJobMatch.findMany({
         where: {
           cv_id: user.default_cv_id,
           search_group: defaultMatch.search_group,
           job_id: { not: null },
+          job: {
+            scraped_at: { gte: oneMonthAgo }, // Chốt chặn hiệu năng 1 tháng
+          },
         },
         include: {
           job: {
@@ -435,10 +497,23 @@ export class PersonalDashboardService {
           },
         },
         orderBy: { match_score: 'desc' },
-        take: 5,
+        // Kéo nhiều hơn một chút để đề phòng sau khi lọc trùng vẫn đủ 5 bản ghi
+        take: 20,
       });
 
-      const validMatches = matchedJobs.filter((m) => m.job !== null);
+      // LỌC TRÙNG: Chỉ giữ lại lượt so khớp có điểm cao nhất cho mỗi job_id độc nhất
+      const uniqueMatchesMap = new Map<string, (typeof matchedJobs)[0]>();
+
+      matchedJobs.forEach((m) => {
+        if (m.job_id && !uniqueMatchesMap.has(m.job_id.toString())) {
+          uniqueMatchesMap.set(m.job_id.toString(), m);
+        }
+      });
+
+      // Chuyển map thành mảng phẳng và giới hạn lấy đúng top 5 job phù hợp nhất
+      const validMatches = Array.from(uniqueMatchesMap.values())
+        .filter((m) => m.job !== null)
+        .slice(0, 5);
 
       if (validMatches.length > 0) {
         return validMatches.map((m) => {

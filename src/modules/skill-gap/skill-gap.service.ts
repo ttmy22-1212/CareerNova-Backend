@@ -89,11 +89,14 @@ export class SkillGapService {
   }
 
   /**
-   * 1. LẤY DỮ LIỆU THỐNG KÊ (STATISTICS CARDS)
+   * 1. SKILL GAP STATISTICS
+   * - Đếm số lượng core / priority gaps
+   * - Tính theo weight thực tế
    */
   async getSkillGapStatistics(userId: string): Promise<SkillGapStatisticsDto> {
     try {
       this.logger.log(`Calculating skill gap statistics for user: ${userId}`);
+
       const match = await this.getDefaultMatchOrThrow(userId);
 
       const gapReport = (match.gap_report as unknown as GapReportStructure) || {
@@ -102,136 +105,193 @@ export class SkillGapService {
       };
 
       const rawScore = Number(match.match_score || 0);
+
       const finalScore =
         rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
 
-      let coreGapsCount = 0;
-      let priorityGapsCount = 0;
-      const allGaps = [
-        ...gapReport.partially_matched_skills,
-        ...gapReport.missing_skills,
+      const allGapSkills = [
+        ...(gapReport.partially_matched_skills || []),
+        ...(gapReport.missing_skills || []),
       ];
 
-      allGaps.forEach((skillItem) => {
-        const skill = skillItem as { weight: number };
-        const weightPercentage = skill.weight * 100;
-        if (weightPercentage > 50) {
+      let coreGapsCount = 0;
+      let priorityGapsCount = 0;
+
+      let coreGapScore = 0;
+      let priorityGapScore = 0;
+
+      for (const skill of allGapSkills) {
+        const weight = Number(skill.weight || 0);
+        const gap = Number(skill.gap || 1);
+
+        const severity = weight * gap;
+
+        // >= 0.5 => Core
+        if (weight >= 0.5) {
           coreGapsCount++;
-        } else if (weightPercentage >= 20 && weightPercentage <= 50) {
-          priorityGapsCount++;
+          coreGapScore += severity;
         }
-      });
+        // >= 0.2 => Priority
+        else if (weight >= 0.2) {
+          priorityGapsCount++;
+          priorityGapScore += severity;
+        }
+      }
 
       return {
         match_score: finalScore,
+
         core_gaps_count: coreGapsCount,
         priority_gaps_count: priorityGapsCount,
+
+        // optional field nếu DTO có
+        // core_gap_score: Number(coreGapScore.toFixed(2)),
+        // priority_gap_score: Number(priorityGapScore.toFixed(2)),
       };
     } catch (error: unknown) {
-      this.handleError(error, 'Get Statistics');
-      throw new BadRequestException(
-        'Could not fetch skill gap statistics data',
-      );
+      this.handleError(error, 'Get Skill Gap Statistics');
+
+      throw new BadRequestException('Could not fetch skill gap statistics');
     }
   }
 
   /**
-   * 2. DỮ LIỆU BIỂU ĐỒ SO SÁNH DANH MỤC (Giống hàm getSkillsChartData gốc)
+   * 2. CATEGORY GAP DATA
+   * - Công thức chuẩn:
+   *   gap = user capability - market expectation
+   * - Weighted average theo market_weight
    */
   async getCategoryGapsData(userId: string): Promise<CategoryGapDto[]> {
     try {
-      this.logger.log(`Fetching category gaps chart for user: ${userId}`);
+      this.logger.log(`Fetching category gap data for user: ${userId}`);
 
-      const user = await this.prisma.user.findUnique({
-        where: { user_id: userId },
-        select: { default_match_id: true },
-      });
+      const match = await this.getDefaultMatchOrThrow(userId);
 
-      if (!user || !user.default_match_id) {
-        return [];
-      }
-
-      const defaultMatch = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: user.default_match_id },
-        select: { gap_report: true, search_group: true, job_id: true },
-      });
-
-      if (!defaultMatch || !defaultMatch.gap_report) {
-        return [];
-      }
-
-      const gapReport =
-        defaultMatch.gap_report as unknown as GapReportStructure;
-      const missingSkills = gapReport.missing_skills || [];
-      const partialSkills = gapReport.partially_matched_skills || [];
-
-      // Khởi tạo mảng lưu trữ kỹ năng làm mốc đối chiếu chuẩn từ database
       let baseSkills: Array<{
         skill_id: number;
         category: string;
-        weight: number;
+        market_weight: number;
       }> = [];
 
-      // LUỒNG 1: Nếu khớp theo JOB cụ thể (CV Match)
-      if (defaultMatch.job_id) {
+      // CV JOB
+      if (match.match_type === 'cv_job' && match.job_id) {
         const jobSkills = await this.prisma.jobSkill.findMany({
-          where: { job_id: defaultMatch.job_id },
-          include: { skill: true },
+          where: {
+            job_id: match.job_id,
+          },
+          include: {
+            skill: true,
+          },
         });
+
         baseSkills = jobSkills.map((js) => ({
           skill_id: js.skill_id,
-          category: js.skill.category || 'General', // Giữ nguyên fallback gốc từ file dashboard của bạn
-          weight: 1.0,
+          category: js.skill.category || 'General',
+          market_weight: Number(js.similarity_score || 1),
         }));
       }
-      // LUỒNG 2: Nếu khớp theo nhóm ngành (Role Benchmark)
-      else if (defaultMatch.search_group) {
-        const groupWeights = await this.prisma.jobGroupSkillWeight.findMany({
-          where: { search_group: defaultMatch.search_group },
-          include: { skill: true },
+
+      // SEARCH GROUP
+      else if (match.search_group) {
+        const groupSkills = await this.prisma.jobGroupSkillWeight.findMany({
+          where: {
+            search_group: match.search_group,
+          },
+          include: {
+            skill: true,
+          },
         });
-        baseSkills = groupWeights.map((gw) => ({
+
+        baseSkills = groupSkills.map((gw) => ({
           skill_id: gw.skill_id,
           category: gw.skill.category || 'General',
-          weight: Number(gw.weight_wi),
+          market_weight: Number(gw.weight_wi),
         }));
       }
 
-      const categoryMap = new Map<string, number>();
-
-      // Chạy vòng lặp tính toán gap_score đúng hệt như dashboard
-      for (const bs of baseSkills) {
-        const category = bs.category;
-        const currentScore = categoryMap.get(category) || 0;
-
-        const isMissing = missingSkills.some((m) => m.skill_id === bs.skill_id);
-        const isPartial = partialSkills.some((p) => p.skill_id === bs.skill_id);
-
-        let gapImpact = 0;
-        if (isMissing) {
-          gapImpact = -bs.weight * 10;
-        } else if (isPartial) {
-          const partialItem = partialSkills.find(
-            (p) => p.skill_id === bs.skill_id,
-          );
-          const gapVal = partialItem ? (partialItem as { gap: number }).gap : 0;
-          gapImpact = -Number(gapVal) * 10;
-        } else {
-          gapImpact = bs.weight * 5;
-        }
-
-        categoryMap.set(category, currentScore + gapImpact);
+      if (baseSkills.length === 0) {
+        return [];
       }
 
-      // Trả về đúng cấu trúc và filter chặn các group không biến động
-      return Array.from(categoryMap.entries())
-        .map(([category, score]) => ({
+      const gapReport = (match.gap_report as unknown as GapReportStructure) || {
+        partially_matched_skills: [],
+        missing_skills: [],
+      };
+
+      const partialSkills = gapReport.partially_matched_skills || [];
+
+      const missingSkills = gapReport.missing_skills || [];
+
+      const categoryMap = new Map<
+        string,
+        {
+          weightedUser: number;
+          weightedMarket: number;
+          totalWeight: number;
+        }
+      >();
+
+      for (const bs of baseSkills) {
+        const category = bs.category;
+        const marketRate = Math.round(bs.market_weight * 100);
+
+        let userRate = marketRate;
+
+        const missingItem = missingSkills.find(
+          (m) => Number(m.skill_id) === Number(bs.skill_id),
+        );
+
+        const partialItem = partialSkills.find(
+          (p) => Number(p.skill_id) === Number(bs.skill_id),
+        );
+
+        // Missing
+        if (missingItem) {
+          userRate = 0;
+        }
+
+        // Partial
+        else if (partialItem) {
+          const similarity =
+            typeof partialItem.similarity === 'number'
+              ? partialItem.similarity
+              : 0;
+
+          userRate = Math.round(similarity * marketRate);
+        }
+
+        if (!categoryMap.has(category)) {
+          categoryMap.set(category, {
+            weightedUser: 0,
+            weightedMarket: 0,
+            totalWeight: 0,
+          });
+        }
+
+        const group = categoryMap.get(category)!;
+
+        group.weightedUser += userRate * bs.market_weight;
+
+        group.weightedMarket += marketRate * bs.market_weight;
+
+        group.totalWeight += bs.market_weight;
+      }
+
+      return Array.from(categoryMap.entries()).map(([category, data]) => {
+        const avgUser = Math.round(data.weightedUser / data.totalWeight);
+
+        const avgMarket = Math.round(data.weightedMarket / data.totalWeight);
+
+        const gapScore = avgUser - avgMarket;
+
+        return {
           category,
-          gap_score: Number(score.toFixed(1)),
-        }))
-        .filter((item) => item.gap_score !== 0);
+          gap_score: gapScore,
+        };
+      });
     } catch (error: unknown) {
       this.handleError(error, 'Get Category Gaps Data');
+
       return [];
     }
   }
@@ -245,105 +305,83 @@ export class SkillGapService {
   ): Promise<RadarSkillPointDto[]> {
     try {
       this.logger.log(
-        `Fetching skills radar chart data for category "${category}" and user: ${userId}`,
+        `Fetching radar data for category "${category}" and user ${userId}`,
       );
 
-      const user = await this.prisma.user.findUnique({
-        where: { user_id: userId },
-        select: { default_match_id: true },
-      });
+      const match = await this.getDefaultMatchOrThrow(userId);
 
-      if (!user || !user.default_match_id) return [];
-
-      const defaultMatch = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: user.default_match_id },
-        select: {
-          radar_data: true,
-          gap_report: true,
-          search_group: true,
-          job_id: true,
-          match_type: true,
-        },
-      });
-
-      if (!defaultMatch) return [];
-
-      // 1. Lấy danh sách kỹ năng gốc thuộc nhóm ngành/Job và phải lọc đúng theo CATEGORY truyền vào từ DB
       let baseSkills: Array<{
         skill_id: number;
         skill_name: string;
         market_weight: number;
       }> = [];
 
-      if (defaultMatch.match_type === 'cv_job' && defaultMatch.job_id) {
-        // Luồng Job cụ thể: Lấy các skill của Job thuộc category này
+      if (match.match_type === 'cv_job' && match.job_id) {
         const jobSkills = await this.prisma.jobSkill.findMany({
           where: {
-            job_id: defaultMatch.job_id,
-            skill: { category: category }, // Lọc an toàn bằng câu lệnh DB, không sợ lỗi chuỗi toLowerCase()
+            job_id: match.job_id,
+            skill: {
+              category: {
+                equals: category,
+                mode: 'insensitive',
+              },
+            },
           },
-          include: { skill: true },
+          include: {
+            skill: true,
+          },
         });
+
         baseSkills = jobSkills.map((js) => ({
           skill_id: js.skill_id,
           skill_name: js.skill.skill_name,
-          market_weight: 1.0,
+          market_weight: Number(js.similarity_score || 1),
         }));
-      } else if (defaultMatch.search_group) {
-        // Luồng Search Group Benchmark: Lấy cấu hình weights ngành thuộc category này
-        const groupWeights = await this.prisma.jobGroupSkillWeight.findMany({
+      } else if (match.search_group) {
+        const groupSkills = await this.prisma.jobGroupSkillWeight.findMany({
           where: {
-            search_group: defaultMatch.search_group,
-            skill: { category: category }, // Lọc an toàn bằng câu lệnh DB
+            search_group: match.search_group,
+            skill: {
+              category: {
+                equals: category,
+                mode: 'insensitive',
+              },
+            },
           },
-          include: { skill: true },
+          include: {
+            skill: true,
+          },
         });
-        baseSkills = groupWeights.map((gw) => ({
+
+        baseSkills = groupSkills.map((gw) => ({
           skill_id: gw.skill_id,
           skill_name: gw.skill.skill_name,
           market_weight: Number(gw.weight_wi),
         }));
       }
 
-      if (baseSkills.length === 0) return [];
+      if (baseSkills.length === 0) {
+        return [];
+      }
 
-      // 2. Lấy dữ liệu phân tích kỹ năng thực tế của người dùng từ DB
-      const matchedSkillsList =
-        (defaultMatch.radar_data as unknown as MatchedSkillDetail[]) || [];
-      const gapReport =
-        defaultMatch.gap_report as unknown as GapReportStructure;
-      const partialSkills =
-        (gapReport && gapReport.partially_matched_skills) || [];
+      const gapReport = (match.gap_report as unknown as GapReportStructure) || {
+        partially_matched_skills: [],
+        missing_skills: [],
+      };
 
-      // 3. Map điểm số chi tiết của từng kĩ năng thuộc danh mục này (Ép kiểu inline để vượt qua ESLint strict)
       return baseSkills.map((bs) => {
-        const skillId = bs.skill_id;
-        let userScore = 0;
+        const marketRate = Math.round(bs.market_weight * 100);
 
-        const matchedItem = matchedSkillsList.find(
-          (s) => (s as { skill_id: number }).skill_id === skillId,
+        const { userRate } = this.calculateSkillRate(
+          bs.skill_id,
+          marketRate,
+          gapReport,
         );
-        const partialItem = partialSkills.find(
-          (p) => (p as { skill_id: number }).skill_id === skillId,
-        );
-
-        if (matchedItem) {
-          userScore = Math.round(
-            ((matchedItem as { similarity: number }).similarity || 0) * 100,
-          );
-        } else if (partialItem) {
-          userScore = Math.round(
-            ((partialItem as { similarity: number }).similarity || 0) * 100,
-          );
-        }
 
         return {
           skill_name: bs.skill_name,
-          user_score: userScore,
-          market_score:
-            Math.round(bs.market_weight * 100) > 0
-              ? Math.round(bs.market_weight * 100)
-              : 70,
+          user_score: userRate,
+          market_score: marketRate,
         };
       });
     } catch (error: unknown) {
@@ -355,16 +393,15 @@ export class SkillGapService {
   /**
    * 4. BẢNG CHI TIẾT TOÀN BỘ KỸ NĂNG (Detailed Breakdown - Bản lấy ALL của Radar)
    */
+
   async getSkillsBreakdownData(
     userId: string,
   ): Promise<CategoryBreakdownDto[]> {
     try {
-      this.logger.log(
-        `Fetching structural hierarchical skill breakdown for user: ${userId}`,
-      );
+      this.logger.log(`Fetching structured skill breakdown for user ${userId}`);
+
       const match = await this.getDefaultMatchOrThrow(userId);
 
-      // 1. Lấy toàn bộ danh sách kỹ năng chuẩn của bài toán từ DB (Không phân biệt category đơn lẻ)
       let baseSkills: Array<{
         skill_id: number;
         skill_name: string;
@@ -374,21 +411,30 @@ export class SkillGapService {
 
       if (match.match_type === 'cv_job' && match.job_id) {
         const jobSkills = await this.prisma.jobSkill.findMany({
-          where: { job_id: match.job_id },
-          include: { skill: true },
+          where: {
+            job_id: match.job_id,
+          },
+          include: {
+            skill: true,
+          },
         });
         baseSkills = jobSkills.map((js) => ({
           skill_id: js.skill_id,
           skill_name: js.skill.skill_name,
           category: js.skill.category || 'General',
-          market_weight: 1.0,
+          market_weight: Number(js.similarity_score || 1),
         }));
       } else if (match.search_group) {
-        const groupWeights = await this.prisma.jobGroupSkillWeight.findMany({
-          where: { search_group: match.search_group },
-          include: { skill: true },
+        const groupSkills = await this.prisma.jobGroupSkillWeight.findMany({
+          where: {
+            search_group: match.search_group,
+          },
+          include: {
+            skill: true,
+          },
         });
-        baseSkills = groupWeights.map((gw) => ({
+
+        baseSkills = groupSkills.map((gw) => ({
           skill_id: gw.skill_id,
           skill_name: gw.skill.skill_name,
           category: gw.skill.category || 'General',
@@ -396,124 +442,131 @@ export class SkillGapService {
         }));
       }
 
-      if (baseSkills.length === 0) return [];
+      if (baseSkills.length === 0) {
+        return [];
+      }
 
-      // 2. Lấy dữ liệu phân tích thực tế từ Match Report
-      const matchedSkillsList =
-        (match.radar_data as unknown as SkillDetail[]) || [];
-      const gapReport = match.gap_report as unknown as GapReportStructure;
-      const partialSkills =
-        (gapReport && gapReport.partially_matched_skills) || [];
-      const missingSkills = (gapReport && gapReport.missing_skills) || [];
+      const gapReport = (match.gap_report as unknown as GapReportStructure) || {
+        partially_matched_skills: [],
+        missing_skills: [],
+      };
 
-      // Dùng Map nhóm các kỹ năng con theo tên Category cha
       const breakdownMap = new Map<
         string,
         {
           totalUserRate: number;
           totalMarketRate: number;
-          totalGapScore: number;
-          skillItems: SkillBreakdownItemDto[];
+          totalGap: number;
+          skills: SkillBreakdownItemDto[];
         }
       >();
 
-      baseSkills.forEach((bs) => {
-        const catName = bs.category;
-        const skillId = bs.skill_id;
+      for (const bs of baseSkills) {
+        const category = bs.category;
+        const marketRate = Math.round(bs.market_weight * 100);
 
-        let marketRate = Math.round(bs.market_weight * 100);
-        if (marketRate === 0) marketRate = 75; // Đặt mốc mặc định giống hiển thị hình ảnh UI mẫu (75%)
-
-        let userRate = 0;
-        let status: 'Proficient' | 'Missing' = 'Missing';
-
-        const matchedItem = matchedSkillsList.find(
-          (s) => (s as { skill_id: number }).skill_id === skillId,
+        const { userRate, status } = this.calculateSkillRate(
+          bs.skill_id,
+          marketRate,
+          gapReport,
         );
-        const partialItem = partialSkills.find(
-          (p) => (p as { skill_id: number }).skill_id === skillId,
-        );
-        const isMissing = missingSkills.some(
-          (m) => (m as { skill_id: number }).skill_id === skillId,
-        );
-
-        if (matchedItem) {
-          userRate = Math.round(
-            ((matchedItem as { similarity: number }).similarity || 0) * 100,
-          );
-          status = userRate >= marketRate ? 'Proficient' : 'Missing';
-        } else if (partialItem) {
-          userRate = Math.round(
-            ((partialItem as { similarity: number }).similarity || 0) * 100,
-          );
-          status = userRate >= marketRate ? 'Proficient' : 'Missing';
-        } else if (isMissing) {
-          userRate = 0;
-          status = 'Missing';
-        } else {
-          // Trường hợp kỹ năng đã khớp hoàn toàn (đầy đủ điểm)
-          userRate = marketRate;
-          status = 'Proficient';
-        }
 
         const skillGap = userRate - marketRate;
 
-        if (!breakdownMap.has(catName)) {
-          breakdownMap.set(catName, {
+        if (!breakdownMap.has(category)) {
+          breakdownMap.set(category, {
             totalUserRate: 0,
             totalMarketRate: 0,
-            totalGapScore: 0,
-            skillItems: [],
+            totalGap: 0,
+            skills: [],
           });
         }
 
-        const group = breakdownMap.get(catName)!;
+        const group = breakdownMap.get(category)!;
+
         group.totalUserRate += userRate;
         group.totalMarketRate += marketRate;
-        group.totalGapScore += skillGap;
-        group.skillItems.push({
-          skill_id: skillId,
+        group.totalGap += skillGap;
+
+        group.skills.push({
+          skill_id: bs.skill_id,
           skill_name: bs.skill_name,
           user_rate: userRate,
           market_rate: marketRate,
           status,
         });
-      });
+      }
 
-      // 3. Đóng gói Map thành mảng DTO phân cấp cấu trúc
       return Array.from(breakdownMap.entries()).map(([categoryName, data]) => {
-        const count = data.skillItems.length;
+        const count = data.skills.length;
+
         const avgUser = Math.round(data.totalUserRate / count);
         const avgMarket = Math.round(data.totalMarketRate / count);
-        const totalGap = Math.round(data.totalGapScore / count); // Tính điểm gap trung bình của nhóm danh mục
-
-        // Định dạng nhãn text hiển thị đúng như thiết kế UI (+ hoặc -)
-        const gapLabel =
-          totalGap >= 0 ? `+${totalGap}pt gap` : `${totalGap}pt gap`;
+        const avgGap = Math.round(data.totalGap / count);
 
         return {
           category_name: categoryName,
-          gap_label: gapLabel,
+          gap_label: avgGap >= 0 ? `+${avgGap}pt gap` : `${avgGap}pt gap`,
           user_rate_avg: avgUser,
           market_rate_avg: avgMarket,
-          skills: data.skillItems,
+          skills: data.skills,
         };
       });
     } catch (error: unknown) {
       this.handleError(error, 'Get Skills Breakdown Data');
+
       throw new BadRequestException(
-        'Could not fetch skills breakdown table data',
+        'Could not fetch structural skills breakdown table data',
       );
     }
   }
 
-  private calculatePriority(
-    weight: number,
-  ): 'Core' | 'Priority' | 'Supporting' {
-    const percentage = weight * 100;
-    if (percentage > 50) return 'Core';
-    if (percentage >= 20) return 'Priority';
-    return 'Supporting';
+  private calculateSkillRate(
+    skillId: number,
+    marketRate: number,
+    gapReport: GapReportStructure,
+  ): {
+    userRate: number;
+    status: 'Proficient' | 'Missing';
+  } {
+    const partialSkills = gapReport.partially_matched_skills || [];
+    const missingSkills = gapReport.missing_skills || [];
+
+    const partialItem = partialSkills.find(
+      (p) => Number(p.skill_id) === Number(skillId),
+    );
+
+    const missingItem = missingSkills.find(
+      (m) => Number(m.skill_id) === Number(skillId),
+    );
+
+    // Missing skill
+    if (missingItem) {
+      return {
+        userRate: 0,
+        status: 'Missing',
+      };
+    }
+
+    // Partial skill
+    if (partialItem) {
+      const similarity =
+        typeof partialItem.similarity === 'number' ? partialItem.similarity : 0;
+
+      const userRate = Math.round(similarity * marketRate);
+
+      return {
+        userRate,
+        status: userRate >= marketRate ? 'Proficient' : 'Missing',
+      };
+    }
+
+    // Nếu không nằm trong partial + missing
+    // => matched hoàn toàn
+    return {
+      userRate: marketRate,
+      status: 'Proficient',
+    };
   }
 
   private handleError(error: unknown, context: string) {

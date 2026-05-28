@@ -16,107 +16,190 @@ export class RecommendationService {
    */
   async getRecentRecommendedJobs(userId: string): Promise<RecommendedJobDto[]> {
     try {
-      this.logger.log(
-        `Fetching 1-month window recommended jobs for user: ${userId}`,
-      );
+      this.logger.log(`Fetching recent recommended jobs for user: ${userId}`);
 
       const user = await this.prisma.user.findUnique({
         where: { user_id: userId },
-        select: { default_match_id: true, default_cv_id: true },
+        select: {
+          default_match_id: true,
+          default_cv_id: true,
+        },
       });
 
-      if (!user || !user.default_match_id || !user.default_cv_id) return [];
+      if (!user || !user.default_match_id || !user.default_cv_id) {
+        return [];
+      }
 
       const defaultMatch = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: user.default_match_id },
-        select: { search_group: true },
+        where: {
+          match_id: user.default_match_id,
+        },
+        select: {
+          search_group: true,
+        },
       });
 
-      if (!defaultMatch || !defaultMatch.search_group) return [];
+      if (!defaultMatch || !defaultMatch.search_group) {
+        return [];
+      }
 
-      // Mốc thời gian chốt chặn: Đúng 1 tháng trước (30 ngày trước so với thời điểm hiện tại)
+      /**
+       * 30 ngày gần nhất
+       */
       const oneMonthAgo = new Date();
       oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
 
-      // Luồng 1: Tìm từ lịch sử so khớp CV cụ thể có ngày cào (scraped_at) trong vòng 1 tháng
+      /**
+       * =====================================================
+       * FLOW 1:
+       * lấy từ lịch sử matching thật của user
+       * =====================================================
+       */
       const matchedJobs = await this.prisma.cvJobMatch.findMany({
         where: {
           cv_id: user.default_cv_id,
           search_group: defaultMatch.search_group,
-          job_id: { not: null },
+
+          job_id: {
+            not: null,
+          },
+
           job: {
-            scraped_at: { gte: oneMonthAgo }, // Chốt chặn hiệu năng 1 tháng
+            scraped_at: {
+              gte: oneMonthAgo,
+            },
           },
         },
+
         include: {
           job: {
-            include: { company: true, salaries: true },
+            include: {
+              company: true,
+              salaries: true,
+            },
           },
         },
-        orderBy: { match_score: 'desc' },
-        take: 5,
+
+        orderBy: {
+          match_score: 'desc',
+        },
+
+        // lấy dư để lọc duplicate
+        take: 20,
       });
 
-      const validMatches = matchedJobs.filter((m) => m.job !== null);
+      /**
+       * Lọc duplicate job_id
+       * chỉ giữ match_score cao nhất
+       */
+      const uniqueMatchesMap = new Map<string, (typeof matchedJobs)[0]>();
 
+      matchedJobs.forEach((m) => {
+        if (m.job_id && !uniqueMatchesMap.has(m.job_id.toString())) {
+          uniqueMatchesMap.set(m.job_id.toString(), m);
+        }
+      });
+
+      const validMatches = Array.from(uniqueMatchesMap.values())
+        .filter((m) => m.job !== null)
+        .slice(0, 5);
+
+      /**
+       * Có lịch sử matching thật
+       */
       if (validMatches.length > 0) {
         return validMatches.map((m) => {
           const job = m.job!;
+
           const salary = job.salaries[0];
+
           let salaryText = 'Thỏa thuận';
+
           if (salary && (salary.min_salary || salary.max_salary)) {
-            salaryText = `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(Number(salary.max_salary || 0))} ${salary.currency || 'VND'}`;
+            salaryText = `${Math.round(
+              Number(salary.min_salary || 0),
+            )} - ${Math.round(
+              Number(salary.max_salary || 0),
+            )} ${salary.currency || 'VND'}`;
           }
 
           return {
             job_id: job.job_id.toString(),
+
             title: job.title,
+
             company_name: job.company?.name || 'N/A',
+
             location: job.location || 'N/A',
+
             match_rate: `${Math.round(Number(m.match_score || 0))}% match`,
+
             salary_text: salaryText,
           };
         });
       }
 
-      // Luồng 2: Fallback nếu chưa từng chạy match job cụ thể -> Quét thẳng bảng job theo group đăng trong 1 tháng
+      /**
+       * =====================================================
+       * FLOW 2:
+       * fallback query raw jobs
+       * =====================================================
+       */
       this.logger.log(
-        `Fallback to query raw jobs within 1 month from group: ${defaultMatch.search_group}`,
+        `No recent matching history found. Fallback to raw jobs from group: ${defaultMatch.search_group}`,
       );
 
       const rawJobs = await this.prisma.job.findMany({
         where: {
           job_category: defaultMatch.search_group,
-          scraped_at: { gte: oneMonthAgo }, // Chốt chặn hiệu năng 1 tháng
+
+          scraped_at: {
+            gte: oneMonthAgo,
+          },
         },
+
         include: {
           company: true,
           salaries: true,
         },
+
         orderBy: {
           scraped_at: 'desc',
         },
+
         take: 5,
       });
 
       return rawJobs.map((job) => {
         const salary = job.salaries[0];
+
         let salaryText = 'Thỏa thuận';
+
         if (salary && (salary.min_salary || salary.max_salary)) {
-          salaryText = `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(Number(salary.max_salary || 0))} ${salary.currency || 'VND'}`;
+          salaryText = `${Math.round(
+            Number(salary.min_salary || 0),
+          )} - ${Math.round(
+            Number(salary.max_salary || 0),
+          )} ${salary.currency || 'VND'}`;
         }
 
         return {
           job_id: job.job_id.toString(),
+
           title: job.title,
+
           company_name: job.company?.name || 'N/A',
+
           location: job.location || 'N/A',
+
           match_rate: 'Xem chi tiết',
+
           salary_text: salaryText,
         };
       });
     } catch (error: unknown) {
       this.handleError(error, 'Get Recent Recommended Jobs');
+
       return [];
     }
   }
@@ -164,6 +247,7 @@ export class RecommendationService {
           match_type: m.match_type,
           match_score: finalScore,
           created_at: m.created_at,
+          cv_id: m.cv_id,
         };
       });
     } catch (error: unknown) {

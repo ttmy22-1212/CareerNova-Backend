@@ -38,4 +38,7 @@ export class SavedReportItemDto {
 
   @ApiProperty({ example: '2026-05-25T15:30:00.000Z' })
   created_at: Date | null;
+
+  @ApiProperty({ example: '6e368daa-075f-466f-ba1e-4e4fade5b42a' })
+  cv_id: string;
 }

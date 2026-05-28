@@ -15,6 +15,7 @@ import { MatchingModule } from './modules/matching/matching.module';
 import { PersonalDashboardModule } from './modules/personal-dashboard/personal-dashboard.module';
 import { SkillGapModule } from './modules/skill-gap/skill-gap.module';
 import { RecommendationModule } from './modules/recommendation/recommendation.module';
+import { LearningRoadmapModule } from './modules/learning-roadmap/learning-roadmap.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { RecommendationModule } from './modules/recommendation/recommendation.mo
     PersonalDashboardModule,
     SkillGapModule,
     RecommendationModule,
+    LearningRoadmapModule,
   ],
   controllers: [AppController],
   providers: [AppService],

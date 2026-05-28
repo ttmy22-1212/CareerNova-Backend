@@ -30,6 +30,7 @@ model User {
   onboarding_completed      Boolean            @default(false)
   notifications             Notification[]
   saved_jobs                SavedJob[]
+  saved_courses             SavedCourse[]
   auth_providers            UserAuthProvider[]
   cvs                       UserCv[]
   
@@ -364,4 +365,71 @@ model SavedJob {
   @@unique([user_id, job_id])
   @@index([user_id], map: "idx_saved_jobs_user_id")
   @@map("saved_jobs")
+}
+
+// ==========================================
+// MODELS CHO KHÓA HỌC & LỘ TRÌNH (LEARNING ROADMAP)
+// ==========================================
+
+model Course {
+  course_id       String     @id @default(uuid()) @db.Uuid
+  course_title    String     @db.VarChar(500)
+  provider_name   String     @db.VarChar(100)
+  source_url      String?    @db.Text
+  thumbnail_icon  String?    @db.VarChar(50)
+  duration_hours  Int
+  rating          Decimal    @default(4.5) @db.Decimal(3, 2)
+  total_learners  String     @db.VarChar(50) // Ví dụ: "33.8K"
+  price           Decimal    @default(0.00) @db.Decimal(10, 2)
+  currency        String     @default("USD") @db.VarChar(10)
+  skills_tags     String[]   // Mảng chuỗi các kĩ năng liên quan
+  is_recommended  Boolean    @default(false) // Dùng cho mục "Recommended for You"
+
+  // Quan hệ
+  paths_included  PathCourse[]
+  saved_by_users  SavedCourse[]
+
+  @@map("courses")
+}
+
+model LearningPath {
+  path_id                   String       @id @default(uuid()) @db.Uuid
+  path_title                String       @db.VarChar(255)
+  path_description          String       @db.Text
+  path_level                String       @default("Intermediate") @db.VarChar(50) // Beginner | Intermediate | Advanced
+  path_icon                 String       @default("rocket") @db.VarChar(50)
+  estimated_duration_months String       @default("2 months") @db.VarChar(50)
+  skill_key                 String       @db.VarChar(255) // Đồng bộ để UI filter theo skill từ DB
+
+  // Quan hệ
+  courses_in_path           PathCourse[]
+
+  @@map("learning_paths")
+}
+
+// Bảng trung gian định nghĩa danh sách khóa học nằm trong Lộ trình
+model PathCourse {
+  path_id     String       @db.Uuid
+  course_id   String       @db.Uuid
+  sort_order  Int          @default(0) // Thứ tự hiển thị trong lộ trình
+
+  path        LearningPath @relation(fields: [path_id], references: [path_id], onDelete: Cascade)
+  course      Course       @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
+
+  @@id([path_id, course_id])
+  @@map("path_courses")
+}
+
+// Bảng lưu các khóa học mà User đã bấm Lưu / Bookmark hoặc Đánh dấu đã học xong
+model SavedCourse {
+  user_id     String   @db.Uuid
+  course_id   String   @db.Uuid
+  status      String   @default("saved") // "saved" (Đã lưu) hoặc "completed" (User tự tích chọn đã hoàn thành)
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+
+  user        User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  course      Course   @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
+
+  @@id([user_id, course_id])
+  @@map("saved_courses")
 }
