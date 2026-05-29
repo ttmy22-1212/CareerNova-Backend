@@ -10,6 +10,8 @@ import * as bcrypt from 'bcrypt';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-profile.dto';
 import { UpdateOnboardingProgressDto } from './dto/update-onboarding-progress.dto';
+import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
+import * as streamifier from 'streamifier';
 
 @Injectable()
 export class ProfileService {
@@ -405,6 +407,62 @@ export class ProfileService {
     }
   }
 
+  async getSavedCourses(userId: string) {
+    this.logger.log(`Fetching saved courses for user ID: ${userId}`);
+
+    try {
+      const savedCourses = await this.prisma.savedCourse.findMany({
+        where: { user_id: userId },
+        orderBy: { created_at: 'desc' },
+        include: {
+          course: {
+            include: {
+              paths_included: {
+                include: {
+                  path: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      return savedCourses.map((item) => ({
+        course_id: item.course.course_id,
+        saved_at: item.created_at,
+        status: item.status,
+
+        course: {
+          course_id: item.course.course_id,
+          course_title: item.course.course_title,
+          provider_name: item.course.provider_name,
+          source_url: item.course.source_url,
+          thumbnail_icon: item.course.thumbnail_icon,
+          duration_hours: item.course.duration_hours,
+          rating: Number(item.course.rating),
+          total_learners: item.course.total_learners,
+          price: Number(item.course.price),
+          currency: item.course.currency,
+          skills_tags: item.course.skills_tags,
+          is_recommended: item.course.is_recommended,
+
+          learning_paths: item.course.paths_included.map((pc) => ({
+            path_id: pc.path.path_id,
+            path_title: pc.path.path_title,
+            path_level: pc.path.path_level,
+            skill_key: pc.path.skill_key,
+          })),
+        },
+      }));
+    } catch (error: unknown) {
+      this.logger.error(
+        `Error fetching saved courses: ${(error as Error).message}`,
+      );
+
+      throw new BadRequestException('FAILED_TO_FETCH_SAVED_COURSES');
+    }
+  }
+
   async getSavedJobs(userId: string) {
     this.logger.log(`Fetching saved jobs for user ID: ${userId}`);
 
@@ -572,5 +630,71 @@ export class ProfileService {
       message: 'DEFAULT_MATCHING_SET_SUCCESSFULLY',
       default_match_id: matchId,
     };
+  }
+
+  async uploadAvatar(userId: string, file: Express.Multer.File) {
+    try {
+      this.logger.log(
+        `User ID ${userId} is uploading a new avatar: ${file.originalname}`,
+      );
+
+      // 1. Upload file ảnh lên Cloudinary bằng Stream
+      const result = await this.uploadAvatarToCloudinary(file);
+
+      // 2. Cập nhật đường dẫn URL mới nhận được từ Cloudinary vào DB
+      const updatedUser = await this.prisma.user.update({
+        where: { user_id: userId },
+        data: {
+          avatar_url: result.secure_url,
+          updated_at: new Date(),
+        },
+        select: {
+          user_id: true,
+          full_name: true,
+          avatar_url: true,
+        },
+      });
+
+      this.logger.log(`Avatar updated successfully for user ID: ${userId}`);
+
+      return {
+        message: 'AVATAR_UPLOADED_SUCCESSFULLY',
+        url: updatedUser.avatar_url,
+      };
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.error(`Avatar upload failed for user ${userId}: ${message}`);
+      throw new BadRequestException('Could not upload avatar image to storage');
+    }
+  }
+
+  /**
+   * Helper kết nối luồng streamifier đẩy dữ liệu buffer của ảnh lên Cloudinary
+   */
+  private uploadAvatarToCloudinary(
+    file: Express.Multer.File,
+  ): Promise<UploadApiResponse> {
+    return new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder: 'avatars',
+          resource_type: 'image',
+          public_id: `${Date.now()}-${file.originalname.split('.')[0]}`,
+          use_filename: true,
+          unique_filename: true,
+          access_mode: 'public',
+        },
+        (error, result: UploadApiResponse | undefined) => {
+          if (error || !result) {
+            return reject(
+              new Error(error?.message || 'Unknown Cloudinary error'),
+            );
+          }
+          resolve(result);
+        },
+      );
+
+      streamifier.createReadStream(file.buffer).pipe(uploadStream);
+    });
   }
 }

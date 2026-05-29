@@ -10,6 +10,11 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  UseInterceptors,
+  UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
+  FileTypeValidator,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -29,6 +34,7 @@ import {
   SetDefaultCvDto,
   SetDefaultMatchingDto,
 } from './dto/update-default.dto';
+import { FileInterceptor } from '@nestjs/platform-express';
 
 @ApiTags('Profile')
 @ApiBearerAuth('JWT-auth')
@@ -107,6 +113,28 @@ export class ProfileController {
     return await this.profileService.changePassword(req.user.sub, dto);
   }
 
+  @Post('avatar')
+  @ApiOperation({ summary: 'Tải lên ảnh đại diện mới' })
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Ảnh đại diện đã được cập nhật thành công.',
+  })
+  async uploadAvatar(
+    @Req() req: AuthenticatedRequest,
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }), // Giới hạn 5MB
+          new FileTypeValidator({ fileType: '.(png|jpeg|jpg|webp)' }), // Chỉ nhận file ảnh
+        ],
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    return await this.profileService.uploadAvatar(req.user.sub, file);
+  }
+
   @Get('activity')
   @ApiOperation({ summary: 'Lấy lịch sử hoạt động' })
   @ApiResponse({
@@ -130,6 +158,16 @@ export class ProfileController {
   })
   async deleteAccount(@Req() req: AuthenticatedRequest) {
     return await this.profileService.deleteAccount(req.user.sub);
+  }
+
+  @Get('saved-courses')
+  @ApiOperation({ summary: 'Lấy danh sách khóa học đã lưu' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Danh sách các khóa học đã lưu của user thành công.',
+  })
+  async getSavedCourses(@Req() req: AuthenticatedRequest) {
+    return { data: await this.profileService.getSavedCourses(req.user.sub) };
   }
 
   @Get('saved-jobs')
