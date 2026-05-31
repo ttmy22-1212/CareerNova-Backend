@@ -1,5 +1,5 @@
 # ==========================================
-# Stage 1: Build source code
+# Stage 1: Build source code (Môi trường build)
 # ==========================================
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -9,17 +9,17 @@ RUN apk add --no-cache openssl
 COPY package.json yarn.lock ./
 COPY prisma ./prisma/
 
-# Cài đặt TOÀN BỘ dependencies để phục vụ cho việc build
 RUN yarn install --frozen-lockfile
 
-COPY . .
 RUN npx prisma generate
+
+COPY . .
 RUN yarn build
 
 RUN rm -rf node_modules && yarn install --production --frozen-lockfile
 
 # ==========================================
-# Stage 2: Môi trường chạy Production
+# Stage 2: Môi trường chạy Production siêu nhẹ
 # ==========================================
 FROM node:20-alpine AS runner
 WORKDIR /app
