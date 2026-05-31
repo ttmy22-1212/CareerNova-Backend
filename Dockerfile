@@ -12,11 +12,13 @@ COPY prisma ./prisma/
 RUN yarn install --frozen-lockfile
 
 COPY . .
+
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+RUN npx prisma generate
+
 RUN yarn build
 
 RUN rm -rf node_modules && yarn install --production --frozen-lockfile
-
-RUN npx prisma generate
 
 # ==========================================
 # Stage 2: Môi trường chạy Production siêu nhẹ
