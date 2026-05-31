@@ -7,18 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ==========================================
+// BẢNG LIÊN QUAN ĐẾN USER & CV (DÙNG UUID THEO DEV WEB)
+// ==========================================
+
 model User {
   user_id                   String             @id @default(uuid()) @db.Uuid
   full_name                 String?            @db.VarChar(255)
   email                     String?            @unique @db.VarChar(255)
-  password_hash             String?
-  avatar_url                String?
+  password_hash             String?            @db.Text
+  avatar_url                String?            @db.Text
   role                      String             @default("student") @db.VarChar(50)
   created_at                DateTime?          @default(now()) @db.Timestamp(6)
   updated_at                DateTime?          @default(now()) @db.Timestamp(6)
   is_active                 Boolean            @default(false)
-  verify_token              String?
+  verify_token              String?            @db.VarChar(255)
   verify_token_expires      DateTime?          @db.Timestamp(6)
+  
+  // Các trường bổ sung của Web
   school                    String?            @db.VarChar(255)
   major                     String?            @db.VarChar(255)
   current_year              Int?
@@ -28,12 +34,15 @@ model User {
   prefer_remote             Boolean?
   current_step              Int                @default(1)
   onboarding_completed      Boolean            @default(false)
+  
+  // Quan hệ 1 - Nhiều
   notifications             Notification[]
   saved_jobs                SavedJob[]
   saved_courses             SavedCourse[]
   auth_providers            UserAuthProvider[]
   cvs                       UserCv[]
   
+  // Quan hệ 1 - 1 (Dùng UUID đồng bộ với PK tương ứng)
   default_cv_id             String?            @unique @db.Uuid
   default_cv                UserCv?            @relation("UserDefaultCv", fields: [default_cv_id], references: [cv_id], onDelete: SetNull)
 
@@ -51,7 +60,7 @@ model UserAuthProvider {
   provider_user_id    String    @db.VarChar(255)
   provider_email      String?   @db.VarChar(255)
   provider_name       String?   @db.VarChar(255)
-  provider_avatar_url String?
+  provider_avatar_url String?   @db.Text
   created_at          DateTime? @default(now()) @db.Timestamp(6)
   last_login_at       DateTime? @db.Timestamp(6)
   user                User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
@@ -65,15 +74,16 @@ model UserCv {
   cv_id          String        @id @default(uuid()) @db.Uuid
   user_id        String        @db.Uuid
   file_name      String?       @db.VarChar(255)
-  file_url       String?
-  extracted_text String?
+  file_url       String?       @db.Text
+  extracted_text String?       @db.Text
   uploaded_at    DateTime?     @default(now()) @db.Timestamp(6)
   updated_at     DateTime?     @default(now()) @db.Timestamp(6)
+  
   matches        CvJobMatch[]
   cv_skills      UserCvSkill[]
   user           User          @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
   default_for_user User?       @relation("UserDefaultCv")
+
   @@index([user_id], map: "idx_user_cvs_user_id")
   @@map("user_cvs")
 }
@@ -82,7 +92,7 @@ model UserCvSkill {
   cv_id      String    @db.Uuid
   skill_id   Int
   created_at DateTime? @default(now()) @db.Timestamp(6)
-  raw_skill  String?   @db.VarChar(255) // BỔ SUNG TỪ SQL
+  raw_skill  String?   @db.VarChar(255)
   cv         UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
   skill      Skill     @relation(fields: [skill_id], references: [skill_id], onDelete: Cascade)
 
@@ -91,15 +101,44 @@ model UserCvSkill {
   @@map("user_cv_skills")
 }
 
+model CvJobMatch {
+  match_id         String    @id @default(uuid()) @db.Uuid
+  cv_id            String    @db.Uuid
+  match_type       String    @db.VarChar(50)
+  search_group     String?   @db.VarChar(100)
+  job_id           BigInt?
+  match_score      Decimal?  @db.Decimal(5, 2)
+  radar_data       Json?     @db.JsonB
+  gap_report       Json?     @db.JsonB
+  model_version    String?   @db.VarChar(100)
+  created_at       DateTime? @default(now()) @db.Timestamp(6)
+  updated_at       DateTime? @default(now()) @db.Timestamp(6)
+  
+  cv               UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
+  job              Job?      @relation(fields: [job_id], references: [job_id], onDelete: SetNull)
+  default_for_user User?     @relation("UserDefaultMatch")
+
+  @@index([created_at], map: "idx_cv_job_matches_created_at")
+  @@index([cv_id], map: "idx_cv_job_matches_cv_id")
+  @@index([job_id], map: "idx_cv_job_matches_job_id")
+  @@index([match_type], map: "idx_cv_job_matches_match_type")
+  @@index([search_group], map: "idx_cv_job_matches_search_group")
+  @@map("cv_job_matches")
+}
+
+// ==========================================
+// BẢNG LIÊN QUAN ĐẾN THUẬT TOÁN / CRAWL DATA (GIỮ NGUYÊN KIỂU SỐ / BIGINT)
+// ==========================================
+
 model Company {
   company_id         BigInt            @id
   name               String            @db.VarChar(255)
-  description        String?
+  description        String?           @db.Text
   company_size_min   Int?
   company_size_max   Int?
   country            String?           @db.VarChar(100)
   city               String?           @db.VarChar(100)
-  address            String?
+  address            String?           @db.Text
   url                String?           @db.VarChar(500)
   industry           String?           @db.VarChar(255)
   updated_at         DateTime?         @default(now()) @db.Timestamp(6)
@@ -131,24 +170,25 @@ model Job {
   job_id                     BigInt       @id @default(autoincrement())
   company_id                 BigInt?
   title                      String       @db.VarChar(500)
-  skills_desc                String?
-  description                String?
-  formatted_experience_level String?      @db.VarChar(100)
-  work_type                  String?      @db.VarChar(100)
+  skills_desc                String?      @db.Text
+  description                String?      @db.Text
+  formatted_experience_level String?      @db.Text
+  work_type                  String?      @db.Text
   location                   String?      @db.VarChar(255)
   is_remote                  Boolean?     @default(false)
   listed_time                DateTime?    @db.Timestamptz(6)
   expiry_time                DateTime?    @db.Timestamptz(6)
-  job_posting_url            String?
+  job_posting_url            String?      @db.Text
   scraped_at                 DateTime?    @default(now()) @db.Timestamp(6)
   applies                    Int?         @default(0)
   views                      Int?         @default(0)
   fingerprint                String?      @unique @db.VarChar(32)
-  job_category               String?      @db.VarChar(100)
-  search_group               String?      @db.VarChar(100)
+  job_category               String?      @db.Text
+  search_group               String?      @db.Text
   source_name                String?      @db.VarChar(50)
   source_id                  String?      @db.VarChar(255)
   updated_at                 DateTime?    @default(now()) @db.Timestamp(6)
+  
   cv_matches                 CvJobMatch[]
   job_benefits               JobBenefit[]
   job_skills                 JobSkill[]
@@ -164,7 +204,6 @@ model Job {
   @@index([search_group], map: "idx_jobs_search_group")
   @@index([source_name], map: "idx_jobs_source_name")
   @@index([title], map: "idx_jobs_title")
-  @@index([skills_desc], map: "idx_jobs_skills_search")
   @@map("jobs")
 }
 
@@ -189,10 +228,11 @@ model Skill {
   created_at              DateTime?             @default(now()) @db.Timestamp(6)
   type                    String?               @db.VarChar(100)
   updated_at              DateTime?             @default(now()) @db.Timestamp(6)
+  
   job_group_skill_weights JobGroupSkillWeight[]
   job_skills              JobSkill[]
   user_cv_skills          UserCvSkill[]
-  unmatched_skills        UnmatchedSkill[]      
+  unmatched_skills        UnmatchedSkill[]
 
   @@map("skills")
 }
@@ -244,30 +284,6 @@ model JobGroupSkillWeight {
   @@map("job_group_skill_weights")
 }
 
-model CvJobMatch {
-  match_id         String    @id @default(uuid()) @db.Uuid
-  cv_id            String    @db.Uuid
-  match_type       String    @db.VarChar(50)
-  search_group     String?   @db.VarChar(100)
-  job_id           BigInt?
-  match_score      Decimal?  @db.Decimal(5, 2)
-  radar_data       Json?
-  gap_report       Json?
-  model_version    String?   @db.VarChar(100)
-  created_at       DateTime? @default(now()) @db.Timestamp(6)
-  updated_at       DateTime? @default(now()) @db.Timestamp(6)
-  cv               UserCv    @relation(fields: [cv_id], references: [cv_id], onDelete: Cascade)
-  job              Job?      @relation(fields: [job_id], references: [job_id], onDelete: SetNull)
-  default_for_user User?     @relation("UserDefaultMatch")
-
-  @@index([created_at], map: "idx_cv_job_matches_created_at")
-  @@index([cv_id], map: "idx_cv_job_matches_cv_id")
-  @@index([job_id], map: "idx_cv_job_matches_job_id")
-  @@index([match_type], map: "idx_cv_job_matches_match_type")
-  @@index([search_group], map: "idx_cv_job_matches_search_group")
-  @@map("cv_job_matches")
-}
-
 model SearchGroupKeyword {
   id        Int    @id @default(autoincrement())
   group_key String @db.VarChar(255)
@@ -310,6 +326,10 @@ model UnmatchedSkillSource {
   @@id([source_id, unmatched_id, source_type])
   @@map("unmatched_skill_sources")
 }
+
+// ==========================================
+// BẢNG LIÊN QUAN ĐẾN THÔNG BÁO & USER ACTIONS (WEB CHẠY - DÙNG UUID)
+// ==========================================
 
 model NotificationTemplate {
   template_id         String   @id @default(uuid()) @db.Uuid
@@ -368,24 +388,22 @@ model SavedJob {
 }
 
 // ==========================================
-// MODELS CHO KHÓA HỌC & LỘ TRÌNH (LEARNING ROADMAP)
+// BẢNG BỔ SUNG CHO KHÓA HỌC & LỘ TRÌNH (WEB CHẠY - DÙNG UUID)
 // ==========================================
 
 model Course {
-  course_id       String     @id @default(uuid()) @db.Uuid
-  course_title    String     @db.VarChar(500)
-  provider_name   String     @db.VarChar(100)
-  source_url      String?    @db.Text
-  thumbnail_icon  String?    @db.VarChar(50)
+  course_id       String        @id @default(uuid()) @db.Uuid
+  course_title    String        @db.VarChar(500)
+  provider_name   String        @db.VarChar(100)
+  source_url      String?       @db.Text
+  thumbnail_icon  String?       @db.VarChar(50)
   duration_hours  Int
-  rating          Decimal    @default(4.5) @db.Decimal(3, 2)
-  total_learners  String     @db.VarChar(50) // Ví dụ: "33.8K"
-  price           Decimal    @default(0.00) @db.Decimal(10, 2)
-  currency        String     @default("USD") @db.VarChar(10)
-  skills_tags     String[]   // Mảng chuỗi các kĩ năng liên quan
-  is_recommended  Boolean    @default(false) // Dùng cho mục "Recommended for You"
-
-  // Quan hệ
+  rating          Decimal       @default(4.5) @db.Decimal(3, 2)
+  total_learners  String        @db.VarChar(50)
+  price           Decimal       @default(0.00) @db.Decimal(10, 2)
+  currency        String        @default("USD") @db.VarChar(10)
+  skills_tags     String[]
+  is_recommended  Boolean       @default(false)
   paths_included  PathCourse[]
   saved_by_users  SavedCourse[]
 
@@ -396,23 +414,19 @@ model LearningPath {
   path_id                   String       @id @default(uuid()) @db.Uuid
   path_title                String       @db.VarChar(255)
   path_description          String       @db.Text
-  path_level                String       @default("Intermediate") @db.VarChar(50) // Beginner | Intermediate | Advanced
+  path_level                String       @default("Intermediate") @db.VarChar(50)
   path_icon                 String       @default("rocket") @db.VarChar(50)
   estimated_duration_months String       @default("2 months") @db.VarChar(50)
-  skill_key                 String       @db.VarChar(255) // Đồng bộ để UI filter theo skill từ DB
-
-  // Quan hệ
+  skill_key                 String       @db.VarChar(255)
   courses_in_path           PathCourse[]
 
   @@map("learning_paths")
 }
 
-// Bảng trung gian định nghĩa danh sách khóa học nằm trong Lộ trình
 model PathCourse {
   path_id     String       @db.Uuid
   course_id   String       @db.Uuid
-  sort_order  Int          @default(0) // Thứ tự hiển thị trong lộ trình
-
+  sort_order  Int          @default(0)
   path        LearningPath @relation(fields: [path_id], references: [path_id], onDelete: Cascade)
   course      Course       @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
 
@@ -420,13 +434,11 @@ model PathCourse {
   @@map("path_courses")
 }
 
-// Bảng lưu các khóa học mà User đã bấm Lưu / Bookmark hoặc Đánh dấu đã học xong
 model SavedCourse {
   user_id     String   @db.Uuid
   course_id   String   @db.Uuid
-  status      String   @default("saved") // "saved" (Đã lưu) hoặc "completed" (User tự tích chọn đã hoàn thành)
+  status      String   @default("saved")
   created_at  DateTime @default(now()) @db.Timestamp(6)
-
   user        User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
   course      Course   @relation(fields: [course_id], references: [course_id], onDelete: Cascade)
 

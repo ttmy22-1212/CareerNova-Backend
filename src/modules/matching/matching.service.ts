@@ -4,6 +4,8 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import axios from 'axios';
+import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -11,11 +13,7 @@ import {
   CheckHistoryResponseDto,
   CvJobMatchResultDto,
 } from './dto/matching.dto';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import * as path from 'path';
-
-const execAsync = promisify(exec);
 
 interface MatchedSkillDetail {
   skill_id: number;
@@ -67,7 +65,10 @@ export interface MatchingScriptOutput {
 export class MatchingService {
   private readonly logger = new Logger(MatchingService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {}
 
   async getJobGroups(): Promise<string[]> {
     try {
@@ -613,39 +614,52 @@ export class MatchingService {
         }
       } else {
         this.logger.log(
-          '--- MATCHING MODE: REAL PYTHON CLI SCRIPT EXECUTION KICKED IN ---',
+          '--- MATCHING MODE: CALLING FASTAPI WRAPPER SERVICE ---',
         );
+
         if (!cv.file_url) {
           throw new BadRequestException(
             'CV record exists but file_url is empty',
           );
         }
 
-        const relativePythonPath =
-          process.env.MATCHING_SRC_PATH || './.venv/Scripts/python.exe';
-        const absolutePythonPath = path.resolve(
-          process.cwd(),
-          relativePythonPath,
-        );
+        try {
+          const fileResponse = await axios.get(cv.file_url, {
+            responseType: 'arraybuffer',
+          });
 
-        let command = '';
-        if (dto.job_url) {
-          command = `"${absolutePythonPath}" -m matching_cv.match_cv_with_url --cv "${cv.file_url}" --url "${dto.job_url}"`;
-        } else {
-          command = `"${absolutePythonPath}" -m matching_cv.match_cv --cv ${cv.file_url} --search-group "${dto.search_group}" --source-id ${userId}`;
-        }
+          const fileBlob = new Blob([fileResponse.data as ArrayBuffer]);
 
-        this.logger.log(`Executing system CLI command: ${command}`);
-        const { stdout, stderr } = await execAsync(command);
+          const formData = new global.FormData();
+          formData.append('file', fileBlob, path.basename(cv.file_url));
 
-        if (stderr && !stdout) {
-          this.logger.error(`Script error stream: ${stderr}`);
+          const algoBaseUrl =
+            this.configService.get<string>('ALGO_SERVICE_URL') ??
+            'http://127.0.0.1:8000';
+          let targetUrl = '';
+          if (dto.job_url) {
+            // Match theo URL tuyển dụng cụ thể
+            targetUrl = `${algoBaseUrl}/api/v1/matching/job-url`;
+            formData.append('url', dto.job_url);
+          } else {
+            // Match theo Search Group tổng quan (Từ dữ liệu DB)
+            targetUrl = `${algoBaseUrl}/api/v1/matching/search-group`;
+            formData.append('search_group', dto.search_group!);
+            formData.append('source_id', String(userId));
+          }
+
+          this.logger.log(`Sending multipart request to FastAPI: ${targetUrl}`);
+          const algoResponse = await axios.post(targetUrl, formData);
+
+          scriptOutput = algoResponse.data as MatchingScriptOutput;
+        } catch (error) {
+          this.logger.error(
+            `Failed to execute matching via FastAPI: ${error as Error}.message}`,
+          );
           throw new Error(
-            'Python matching script executed with critical error',
+            'Python matching service responded with an error hoặc lỗi mạng',
           );
         }
-
-        scriptOutput = JSON.parse(stdout.trim()) as MatchingScriptOutput;
       }
 
       const radarDataJson =
