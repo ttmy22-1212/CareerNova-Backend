@@ -51,6 +51,8 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
+          no-cache: true
+          pull: true
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/careernova-backend:latest
             ${{ secrets.DOCKER_USERNAME }}/careernova-backend:${{ github.sha }}
