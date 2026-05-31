@@ -11,12 +11,12 @@ COPY prisma ./prisma/
 
 RUN yarn install --frozen-lockfile
 
-RUN npx prisma generate
-
 COPY . .
 RUN yarn build
 
 RUN rm -rf node_modules && yarn install --production --frozen-lockfile
+
+RUN npx prisma generate
 
 # ==========================================
 # Stage 2: Môi trường chạy Production siêu nhẹ
