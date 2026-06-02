@@ -1,38 +1,79 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as nodemailer from 'nodemailer';
+import { google } from 'googleapis';
 
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: nodemailer.Transporter;
+  private oauth2Client: any;
 
   constructor() {
-    const port = parseInt(process.env.EMAIL_PORT || '587');
-    const isSecure = port === 465;
-
     this.logger.log(
-      `Initializing Email Service on Port: ${port}, Secure: ${isSecure}`,
+      'Initializing Email Service using Pure Google HTTP API (No SMTP)',
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    this.transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-      port: port,
-      secure: isSecure,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASSWORD,
-      },
-      family: 4,
-    } as any);
+    this.oauth2Client = new google.auth.OAuth2(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI,
+    );
+
+    this.oauth2Client.setCredentials({
+      refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+    });
   }
 
-  async onModuleInit() {
+  private buildRawEmail(
+    from: string,
+    to: string,
+    subject: string,
+    htmlContent: string,
+  ): string {
+    const encodedSubject = `=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
+
+    const emailLines = [
+      `From: ${from}`,
+      `To: ${to}`,
+      'Content-Type: text/html; charset=utf-8',
+      'MIME-Version: 1.0',
+      `Subject: ${encodedSubject}`,
+      '',
+      htmlContent,
+    ];
+
+    const email = emailLines.join('\r\n');
+
+    return Buffer.from(email)
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  }
+
+  private async sendEmailViaAPI(
+    to: string,
+    subject: string,
+    htmlContent: string,
+  ) {
     try {
-      await this.transporter.verify();
-      console.log('SMTP CONNECT OK');
-    } catch (e) {
-      console.error('SMTP CONNECT FAILED', e);
+      const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
+
+      const fromEmail = `"CareerNova Support" <${process.env.GMAIL_USER}>`;
+      const raw = this.buildRawEmail(fromEmail, to, subject, htmlContent);
+
+      await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: raw,
+        },
+      });
+
+      return { success: true };
+    } catch (error) {
+      this.logger.error(
+        'Error sending email through Pure Google HTTP API:',
+        error,
+      );
+      throw error;
     }
   }
 
@@ -43,11 +84,7 @@ export class EmailService {
     console.log('Token:', token);
     console.log('Verification URL:', verificationUrl);
 
-    const mailOptions = {
-      from: `"CareerNova Support" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: '🚀 Xác thực tài khoản CareerNova của bạn',
-      html: `
+    const htmlContent = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -162,27 +199,21 @@ export class EmailService {
       </div>
     </body>
     </html>
-  `,
-    };
+    `;
 
-    try {
-      await this.transporter.sendMail(mailOptions);
-      console.log(`Verification email sent to ${email}`);
-      return { success: true };
-    } catch (error) {
-      console.error('Error sending email:', error);
-      throw error;
-    }
+    await this.sendEmailViaAPI(
+      email,
+      '🚀 Xác thực tài khoản CareerNova của bạn',
+      htmlContent,
+    );
+    console.log(`Verification email successfully sent to ${email}`);
+    return { success: true };
   }
 
   async sendPasswordResetEmail(email: string, resetToken: string) {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
 
-    const mailOptions = {
-      from: `"CareerNova Support" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: '🔐 Khôi phục mật khẩu CareerNova của bạn',
-      html: `
+    const htmlContent = `
     <!DOCTYPE html>
     <html>
     <head>
@@ -296,16 +327,14 @@ export class EmailService {
       </div>
     </body>
     </html>
-  `,
-    };
+    `;
 
-    try {
-      await this.transporter.sendMail(mailOptions);
-      console.log(`Password reset email sent to ${email}`);
-      return { success: true };
-    } catch (error) {
-      console.error('Error sending password reset email:', error);
-      throw error;
-    }
+    await this.sendEmailViaAPI(
+      email,
+      '🔐 Khôi phục mật khẩu CareerNova của bạn',
+      htmlContent,
+    );
+    console.log(`Password reset email successfully sent to ${email}`);
+    return { success: true };
   }
 }
