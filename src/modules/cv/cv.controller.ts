@@ -36,7 +36,7 @@ export class CvController {
   constructor(private readonly cvService: CvService) {}
 
   @Post('upload')
-  @ApiOperation({ summary: 'Upload CV (PDF, DOC, DOCX) - Max 5MB' })
+  @ApiOperation({ summary: 'Upload CV (PDF, JPG, PNG) - Max 5MB' })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
     description: 'Chọn file CV từ máy tính',
@@ -50,15 +50,13 @@ export class CvController {
   ) {
     if (!file) throw new BadRequestException('File is required');
 
-    // Validation extension
-    const allowedExtensions = ['pdf', 'doc', 'docx'];
+    const allowedExtensions = ['pdf', 'jpg', 'jpeg', 'png'];
     const fileExt = file.originalname.split('.').pop()?.toLowerCase();
 
     if (!fileExt || !allowedExtensions.includes(fileExt)) {
-      throw new BadRequestException('Only PDF, DOC, DOCX are allowed');
+      throw new BadRequestException('Only PDF, JPG, and PNG are allowed');
     }
 
-    // Validation size (5MB)
     if (file.size > 5 * 1024 * 1024) {
       throw new BadRequestException('File size exceeds 5MB');
     }
