@@ -2,6 +2,7 @@ import { Injectable, BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import * as streamifier from 'streamifier';
+import * as path from 'path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CvUploadResponseDto } from './dto/cv-response.dto';
 import {
@@ -61,11 +62,17 @@ export class CvService {
     file: Express.Multer.File,
   ): Promise<UploadApiResponse> {
     return new Promise((resolve, reject) => {
+      const fileExt = path.extname(file.originalname);
+      const baseName = path.basename(file.originalname, fileExt);
+
+      const cleanBaseName = baseName.replace(/[^a-zA-Z0-9_-]/g, '');
+      const customPublicId = `${Date.now()}-${cleanBaseName}`;
+
       const uploadStream = cloudinary.uploader.upload_stream(
         {
           folder: 'cv_uploads',
-          resource_type: 'raw',
-          public_id: `${Date.now()}-${file.originalname}`,
+          resource_type: 'auto',
+          public_id: customPublicId,
           use_filename: true,
           unique_filename: true,
           access_mode: 'public',
