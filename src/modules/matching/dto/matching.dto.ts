@@ -72,3 +72,58 @@ export class CvJobMatchResultDto {
   @ApiProperty({ example: '2026-05-23T00:00:00.000Z' })
   updated_at: Date;
 }
+
+export class GetRadarCategoryQueryDto {
+  @ApiProperty({
+    example: 'Hard Skills',
+    description: 'Tên category muốn lọc để hiển thị radar',
+  })
+  @IsString()
+  @IsNotEmpty()
+  category: string;
+}
+
+export class MatchCategoryResponseDto {
+  @ApiProperty({ example: 'Ngôn ngữ lập trình' })
+  category: string;
+
+  @ApiProperty({
+    example: true,
+    description: 'Có kỹ năng nào thuộc nhóm này trong lượt match không',
+  })
+  is_matched: boolean;
+}
+
+export class MatchedSkillDetailDto {
+  @ApiProperty({ example: 42, description: 'ID của kỹ năng' })
+  skill_id: number;
+
+  @ApiProperty({ example: 'React', description: 'Tên kỹ năng' })
+  skill_name: string;
+
+  @ApiProperty({
+    example: 0.15,
+    description: 'Trọng số/Độ quan trọng của skill đối với Job',
+  })
+  weight: number;
+
+  @ApiProperty({
+    example: 0.85,
+    description: 'Mức độ tương thích của CV ứng viên với skill này',
+  })
+  similarity: number;
+
+  @ApiProperty({
+    example: 0.1275,
+    description: 'Điểm đóng góp vào tổng điểm match score',
+  })
+  contribution: number;
+}
+
+export class RadarCategoryResponseDto {
+  @ApiProperty({
+    type: [MatchedSkillDetailDto],
+    description: 'Danh sách kỹ năng đã được lọc theo category',
+  })
+  data: MatchedSkillDetailDto[];
+}

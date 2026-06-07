@@ -12,6 +12,8 @@ import {
   AnalyzeCvDto,
   CheckHistoryResponseDto,
   CvJobMatchResultDto,
+  MatchCategoryResponseDto,
+  RadarCategoryResponseDto,
 } from './dto/matching.dto';
 import * as path from 'path';
 import FormData from 'form-data';
@@ -375,6 +377,106 @@ export class MatchingService {
         `Failed to get all matches: ${error instanceof Error ? error.message : String(error)}`,
       );
       throw new BadRequestException('Could not retrieve match history');
+    }
+  }
+
+  async getMatchCategories(
+    matchId: string,
+  ): Promise<MatchCategoryResponseDto[]> {
+    try {
+      const match = await this.prisma.cvJobMatch.findUnique({
+        where: { match_id: matchId },
+        select: { radar_data: true },
+      });
+
+      if (!match) {
+        throw new NotFoundException(
+          `Match history with ID ${matchId} not found`,
+        );
+      }
+
+      const matchedSkills =
+        (match.radar_data as unknown as MatchedSkillDetail[]) || [];
+      const matchedSkillNames = new Set(matchedSkills.map((s) => s.skill_name));
+
+      const skillsFromDb = await this.prisma.skill.findMany({
+        select: { category: true },
+        where: { category: { not: null } },
+      });
+
+      const allCategories = Array.from(
+        new Set(
+          skillsFromDb
+            .map((s) => s.category?.trim())
+            .filter(Boolean) as string[],
+        ),
+      );
+
+      const result: MatchCategoryResponseDto[] = await Promise.all(
+        allCategories.map(async (categoryName) => {
+          const activeSkillInGroup = await this.prisma.skill.findFirst({
+            where: {
+              category: categoryName,
+              skill_name: { in: Array.from(matchedSkillNames) },
+            },
+            select: { skill_id: true },
+          });
+
+          return {
+            category: categoryName,
+            is_matched: !!activeSkillInGroup,
+          };
+        }),
+      );
+
+      return result.sort((a, b) => Number(b.is_matched) - Number(a.is_matched));
+    } catch (error) {
+      this.handleError(error, 'MatchingService.getMatchCategories');
+      throw error;
+    }
+  }
+
+  async getRadarByCategory(
+    matchId: string,
+    categoryName: string,
+  ): Promise<RadarCategoryResponseDto> {
+    try {
+      const match = await this.prisma.cvJobMatch.findUnique({
+        where: { match_id: matchId },
+        select: { radar_data: true },
+      });
+
+      if (!match) {
+        throw new NotFoundException(
+          `Match history with ID ${matchId} not found`,
+        );
+      }
+
+      const matchedSkills =
+        (match.radar_data as unknown as MatchedSkillDetail[]) || [];
+
+      const targetSkillsInDb = await this.prisma.skill.findMany({
+        where: {
+          category: {
+            equals: categoryName,
+            mode: 'insensitive',
+          },
+        },
+        select: { skill_name: true },
+      });
+
+      const allowedSkillNames = new Set(
+        targetSkillsInDb.map((s) => s.skill_name),
+      );
+
+      const filteredRadarData = matchedSkills.filter((skill) =>
+        allowedSkillNames.has(skill.skill_name),
+      );
+
+      return { data: filteredRadarData };
+    } catch (error) {
+      this.handleError(error, 'MatchingService.getRadarByCategory');
+      throw error;
     }
   }
 

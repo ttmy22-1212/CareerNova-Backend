@@ -6,6 +6,7 @@ import {
   Param,
   UseGuards,
   Req,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -19,6 +20,9 @@ import {
   AnalyzeCvDto,
   CheckHistoryResponseDto,
   CvJobMatchResultDto,
+  GetRadarCategoryQueryDto,
+  MatchCategoryResponseDto,
+  RadarCategoryResponseDto,
 } from './dto/matching.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -90,6 +94,38 @@ export class MatchingController {
   })
   async getMatchDetail(@Param('match_id') matchId: string) {
     const data = await this.matchingService.getMatchDetail(matchId);
+    return { data };
+  }
+
+  @Get('history/:match_id/categories')
+  @ApiOperation({
+    summary:
+      'Lấy tất cả các category trong hệ thống và trạng thái có trong lượt match không',
+  })
+  @ApiResponse({ status: 200, type: [MatchCategoryResponseDto] })
+  async getMatchCategories(@Param('match_id') matchId: string) {
+    const data = await this.matchingService.getMatchCategories(matchId);
+    return { data };
+  }
+
+  @Get('history/:match_id/radar')
+  @ApiOperation({
+    summary: 'Lấy dữ liệu radar chi tiết đã được lọc theo một category cụ thể',
+  })
+  @ApiResponse({
+    status: 200,
+    type: RadarCategoryResponseDto,
+    description:
+      'Trả về mảng kỹ năng đã lọc theo category (cấu trúc giống radar_data gốc)',
+  })
+  async getRadarByCategory(
+    @Param('match_id') matchId: string,
+    @Query() query: GetRadarCategoryQueryDto,
+  ) {
+    const data = await this.matchingService.getRadarByCategory(
+      matchId,
+      query.category,
+    );
     return { data };
   }
 }
