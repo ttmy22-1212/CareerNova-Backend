@@ -45,17 +45,6 @@ export class SkillDetailLineDto {
   user_rate: number;
 }
 
-export class RadarSkillPointDto {
-  @ApiProperty({ example: 'JavaScript', description: 'Tên kỹ năng' })
-  skill_name: string;
-
-  @ApiProperty({ example: 92, description: 'Tỷ lệ thành thạo của User (%)' })
-  user_score: number;
-
-  @ApiProperty({ example: 100, description: 'Mức độ thị trường yêu cầu (%)' })
-  market_score: number;
-}
-
 export class CategoryGapDto {
   @ApiProperty({ example: 'DevOps', description: 'Tên danh mục' })
   category: string;

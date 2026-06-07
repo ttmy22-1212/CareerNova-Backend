@@ -120,10 +120,44 @@ export class MatchedSkillDetailDto {
   contribution: number;
 }
 
+export class MissingSkillDto {
+  skill_id: number;
+  skill_name: string;
+  weight: number;
+  similarity: number;
+  gap: number;
+}
+
+export class PartiallyMatchedSkillDto {
+  skill_id: number;
+  skill_name: string;
+  weight: number;
+  similarity: number;
+  gap: number;
+  matched_via: string;
+  contribution: number;
+}
+
+export class GapReportDto {
+  @ApiProperty({
+    type: [MissingSkillDto],
+  })
+  missing_skills: MissingSkillDto[];
+
+  @ApiProperty({
+    type: [PartiallyMatchedSkillDto],
+  })
+  partially_matched_skills: PartiallyMatchedSkillDto[];
+}
+
 export class RadarCategoryResponseDto {
   @ApiProperty({
     type: [MatchedSkillDetailDto],
-    description: 'Danh sách kỹ năng đã được lọc theo category',
   })
-  data: MatchedSkillDetailDto[];
+  radar_data: MatchedSkillDetailDto[];
+
+  @ApiProperty({
+    type: GapReportDto,
+  })
+  gap_report: GapReportDto;
 }

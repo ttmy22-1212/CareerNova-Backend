@@ -1,10 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { Controller, Get, Query } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { MarketDashboardService } from './market-dashboard.service';
 import { DashboardFilterDto } from './dto/dashboard-filter.dto';
 import { DashboardFiltersOptionsResponseDto } from './dto/dashboard-filters-options-response.dto';
@@ -15,11 +10,8 @@ import { HotJobsResponseDto } from './dto/hot-jobs-response.dto';
 import { SalaryRangesResponseDto } from './dto/salary-ranges-response.dto';
 import { InDemandSkillsResponseDto } from './dto/in-demand-skills-response.dto';
 import { RisingSkillsResponseDto } from './dto/rising-skills-response.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Market Dashboard')
-@ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
 @Controller('dashboard')
 export class MarketDashboardController {
   constructor(private readonly dashboardService: MarketDashboardService) {}

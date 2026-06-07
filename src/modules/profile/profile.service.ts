@@ -62,7 +62,15 @@ export class ProfileService {
             },
           },
         },
-        default_match: true,
+        default_match: {
+          include: {
+            job: {
+              select: {
+                job_posting_url: true,
+              },
+            },
+          },
+        },
       },
     });
 
@@ -109,6 +117,7 @@ export class ProfileService {
         match_id: this.stringifyId(dm.match_id),
         cv_id: this.stringifyId(dm.cv_id),
         job_id: this.stringifyId(dm.job_id),
+        job_posting_url: dm.job?.job_posting_url || null,
         match_type: dm.match_type,
         search_group: dm.search_group,
         match_score: dm.match_score ? Number(dm.match_score) : null,
@@ -674,6 +683,11 @@ export class ProfileService {
   private uploadAvatarToCloudinary(
     file: Express.Multer.File,
   ): Promise<UploadApiResponse> {
+    if (!file || !file.buffer) {
+      return Promise.reject(
+        new Error('File buffer is missing! Check your Multer configuration.'),
+      );
+    }
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -694,7 +708,10 @@ export class ProfileService {
         },
       );
 
-      streamifier.createReadStream(file.buffer).pipe(uploadStream);
+      const fileStream = streamifier.createReadStream(file.buffer);
+      fileStream.on('error', (err) => reject(err));
+
+      fileStream.pipe(uploadStream);
     });
   }
 }

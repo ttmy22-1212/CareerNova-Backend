@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -11,7 +11,6 @@ import {
   DashboardBannerDto,
   DashboardStatisticsDto,
   RecommendedJobDto,
-  RadarSkillPointDto,
   CategoryGapDto,
   DashboardProgressDto,
 } from './dto/personal-dashboard.dto';
@@ -47,22 +46,6 @@ export class PersonalDashboardController {
   async getRecommendedJobs(@Req() req: AuthenticatedRequest) {
     const userId = req.user.sub;
     const data = await this.dashboardService.getRecommendedJobs(userId);
-    return { data };
-  }
-
-  @Get('skills-radar')
-  @ApiOperation({
-    summary: 'Lấy dữ liệu biểu đồ Radar cụ thể (Tab Kỹ năng - Bên trái)',
-  })
-  @ApiResponse({ status: 200, type: [RadarSkillPointDto] })
-  async getSkillsRadar(
-    @Req() req: AuthenticatedRequest,
-    @Query('category') category: string,
-  ) {
-    const data = await this.dashboardService.getSkillsRadarData(
-      req.user.sub,
-      category,
-    );
     return { data };
   }
 

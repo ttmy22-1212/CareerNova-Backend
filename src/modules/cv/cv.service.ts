@@ -30,7 +30,11 @@ export class CvService {
     file: Express.Multer.File,
   ): Promise<CvUploadResponseDto> {
     try {
-      const { originalname } = file;
+      const originalname = Buffer.from(file.originalname, 'latin1').toString(
+        'utf8',
+      );
+
+      file.originalname = originalname;
 
       this.logger.log(`User ${userId} is uploading file: ${originalname}`);
 

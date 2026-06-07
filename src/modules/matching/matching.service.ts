@@ -386,7 +386,10 @@ export class MatchingService {
     try {
       const match = await this.prisma.cvJobMatch.findUnique({
         where: { match_id: matchId },
-        select: { radar_data: true },
+        select: {
+          radar_data: true,
+          gap_report: true,
+        },
       });
 
       if (!match) {
@@ -395,41 +398,79 @@ export class MatchingService {
         );
       }
 
-      const matchedSkills =
+      const radarSkills =
         (match.radar_data as unknown as MatchedSkillDetail[]) || [];
-      const matchedSkillNames = new Set(matchedSkills.map((s) => s.skill_name));
 
-      const skillsFromDb = await this.prisma.skill.findMany({
-        select: { category: true },
-        where: { category: { not: null } },
-      });
+      const gapReport =
+        (match.gap_report as unknown as {
+          missing_skills?: Array<{ skill_name: string }>;
+          partially_matched_skills?: Array<{ skill_name: string }>;
+        }) || {};
+
+      const missingSkills = gapReport.missing_skills || [];
+      const partialSkills = gapReport.partially_matched_skills || [];
+
+      const matchedSkillNames = Array.from(
+        new Set([
+          ...radarSkills.map((s) => s.skill_name),
+          ...missingSkills.map((s) => s.skill_name),
+          ...partialSkills.map((s) => s.skill_name),
+        ]),
+      );
+
+      const [allSkillsInDb, matchedSkillsInDb] = await Promise.all([
+        this.prisma.skill.findMany({
+          where: {
+            category: { not: null },
+          },
+          select: {
+            category: true,
+          },
+        }),
+
+        this.prisma.skill.findMany({
+          where: {
+            skill_name: {
+              in: matchedSkillNames,
+            },
+            category: {
+              not: null,
+            },
+          },
+          select: {
+            category: true,
+          },
+        }),
+      ]);
 
       const allCategories = Array.from(
         new Set(
-          skillsFromDb
+          allSkillsInDb
             .map((s) => s.category?.trim())
             .filter(Boolean) as string[],
         ),
       );
 
-      const result: MatchCategoryResponseDto[] = await Promise.all(
-        allCategories.map(async (categoryName) => {
-          const activeSkillInGroup = await this.prisma.skill.findFirst({
-            where: {
-              category: categoryName,
-              skill_name: { in: Array.from(matchedSkillNames) },
-            },
-            select: { skill_id: true },
-          });
-
-          return {
-            category: categoryName,
-            is_matched: !!activeSkillInGroup,
-          };
-        }),
+      const matchedCategoriesSet = new Set(
+        matchedSkillsInDb
+          .map((s) => s.category?.trim())
+          .filter(Boolean) as string[],
       );
 
-      return result.sort((a, b) => Number(b.is_matched) - Number(a.is_matched));
+      const formattedCategories = allCategories
+        .map((category) => ({
+          category,
+          is_matched: matchedCategoriesSet.has(category),
+        }))
+        .sort((a, b) => Number(b.is_matched) - Number(a.is_matched));
+
+      return [
+        {
+          category: 'All',
+          is_matched: true,
+        },
+        ...formattedCategories,
+      ];
     } catch (error) {
       this.handleError(error, 'MatchingService.getMatchCategories');
       throw error;
@@ -443,7 +484,10 @@ export class MatchingService {
     try {
       const match = await this.prisma.cvJobMatch.findUnique({
         where: { match_id: matchId },
-        select: { radar_data: true },
+        select: {
+          radar_data: true,
+          gap_report: true,
+        },
       });
 
       if (!match) {
@@ -452,8 +496,23 @@ export class MatchingService {
         );
       }
 
-      const matchedSkills =
+      const radarData =
         (match.radar_data as unknown as MatchedSkillDetail[]) || [];
+
+      const gapReport = (match.gap_report as unknown as GapReportStructure) || {
+        missing_skills: [],
+        partially_matched_skills: [],
+      };
+
+      if (categoryName.trim().toLowerCase() === 'all') {
+        return {
+          radar_data: radarData,
+          gap_report: {
+            missing_skills: gapReport.missing_skills || [],
+            partially_matched_skills: gapReport.partially_matched_skills || [],
+          },
+        };
+      }
 
       const targetSkillsInDb = await this.prisma.skill.findMany({
         where: {
@@ -462,18 +521,30 @@ export class MatchingService {
             mode: 'insensitive',
           },
         },
-        select: { skill_name: true },
+        select: {
+          skill_name: true,
+        },
       });
 
       const allowedSkillNames = new Set(
         targetSkillsInDb.map((s) => s.skill_name),
       );
 
-      const filteredRadarData = matchedSkills.filter((skill) =>
-        allowedSkillNames.has(skill.skill_name),
-      );
+      return {
+        radar_data: radarData.filter((skill) =>
+          allowedSkillNames.has(skill.skill_name),
+        ),
 
-      return { data: filteredRadarData };
+        gap_report: {
+          missing_skills: (gapReport.missing_skills || []).filter((skill) =>
+            allowedSkillNames.has(skill.skill_name),
+          ),
+
+          partially_matched_skills: (
+            gapReport.partially_matched_skills || []
+          ).filter((skill) => allowedSkillNames.has(skill.skill_name)),
+        },
+      };
     } catch (error) {
       this.handleError(error, 'MatchingService.getRadarByCategory');
       throw error;

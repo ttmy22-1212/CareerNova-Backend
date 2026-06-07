@@ -1,15 +1,9 @@
-import {
-  Injectable,
-  Logger,
-  BadRequestException,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   DashboardBannerDto,
   DashboardStatisticsDto,
   RecommendedJobDto,
-  RadarSkillPointDto,
   CategoryGapDto,
   RecentActivityDto,
   DashboardProgressDto,
@@ -205,165 +199,6 @@ export class PersonalDashboardService {
     } catch (error: unknown) {
       this.handleError(error, 'Get Statistics');
       throw new BadRequestException('Could not fetch dashboard statistics');
-    }
-  }
-
-  private async getDefaultMatchOrThrow(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { user_id: userId },
-      select: { default_match_id: true },
-    });
-
-    if (!user || !user.default_match_id) {
-      throw new NotFoundException(
-        'Vui lòng kích hoạt lượt matching mặc định để xem phân tích kỹ năng.',
-      );
-    }
-
-    const match = await this.prisma.cvJobMatch.findUnique({
-      where: { match_id: user.default_match_id },
-      include: {
-        job: { select: { title: true } },
-      },
-    });
-
-    if (!match) {
-      throw new NotFoundException(
-        'Không tìm thấy dữ liệu phân tích matching mặc định tương ứng.',
-      );
-    }
-
-    return match;
-  }
-
-  async getSkillsRadarData(
-    userId: string,
-    category: string,
-  ): Promise<RadarSkillPointDto[]> {
-    try {
-      this.logger.log(
-        `Fetching skills radar chart data for category "${category}" and user: ${userId}`,
-      );
-
-      const match = await this.getDefaultMatchOrThrow(userId);
-
-      // 1. Lấy base skills theo category
-      let baseSkills: Array<{
-        skill_id: number;
-        skill_name: string;
-        market_weight: number;
-      }> = [];
-
-      /**
-       * CV_JOB FLOW
-       */
-      if (match.match_type === 'cv_job' && match.job_id) {
-        const jobSkills = await this.prisma.jobSkill.findMany({
-          where: {
-            job_id: match.job_id,
-            skill: {
-              category: {
-                equals: category,
-                mode: 'insensitive',
-              },
-            },
-          },
-          include: {
-            skill: true,
-          },
-        });
-
-        baseSkills = jobSkills.map((js) => ({
-          skill_id: js.skill_id,
-          skill_name: js.skill.skill_name,
-          market_weight: Number(js.similarity_score || 1),
-        }));
-      } else if (match.search_group) {
-        /**
-         * SEARCH_GROUP FLOW
-         */
-        const groupSkills = await this.prisma.jobGroupSkillWeight.findMany({
-          where: {
-            search_group: match.search_group,
-            skill: {
-              category: {
-                equals: category,
-                mode: 'insensitive',
-              },
-            },
-          },
-          include: {
-            skill: true,
-          },
-        });
-
-        baseSkills = groupSkills.map((gw) => ({
-          skill_id: gw.skill_id,
-          skill_name: gw.skill.skill_name,
-          market_weight: Number(gw.weight_wi),
-        }));
-      }
-
-      if (baseSkills.length === 0) {
-        return [];
-      }
-
-      // 2. Parse gap report
-      const gapReport = (match.gap_report as unknown as GapReportStructure) || {
-        partially_matched_skills: [],
-        missing_skills: [],
-      };
-
-      const partialSkills = gapReport.partially_matched_skills || [];
-
-      const missingSkills = gapReport.missing_skills || [];
-
-      // 3. Build radar data
-      return baseSkills.map((bs) => {
-        const marketScore = Math.round(bs.market_weight * 100);
-
-        let userScore = marketScore;
-
-        const missingItem = missingSkills.find(
-          (m) => Number(m.skill_id) === Number(bs.skill_id),
-        );
-
-        const partialItem = partialSkills.find(
-          (p) => Number(p.skill_id) === Number(bs.skill_id),
-        );
-
-        /**
-         * Missing skill
-         */
-        if (missingItem) {
-          userScore = 0;
-        } else if (partialItem) {
-          /**
-           * Partial skill
-           */
-          const similarity =
-            typeof partialItem.similarity === 'number'
-              ? partialItem.similarity
-              : 0;
-
-          userScore = Math.round(similarity * marketScore);
-        }
-
-        /**
-         * Else:
-         * fully matched
-         * => userScore = marketScore
-         */
-
-        return {
-          skill_name: bs.skill_name,
-          user_score: userScore,
-          market_score: marketScore,
-        };
-      });
-    } catch (error: unknown) {
-      this.handleError(error, 'Get Skills Radar Data');
-      return [];
     }
   }
 
@@ -576,7 +411,6 @@ export class PersonalDashboardService {
     }
   }
 
-  // TAB TIẾN ĐỘ: Lấy toàn bộ checklist hoàn thiện hồ sơ và hoạt động gần đây
   async getProgressData(userId: string): Promise<DashboardProgressDto> {
     try {
       this.logger.log(`Fetching progress tab data for user: ${userId}`);
