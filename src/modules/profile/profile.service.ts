@@ -39,6 +39,7 @@ export class ProfileService {
         prefer_remote: true,
         current_step: true,
         onboarding_completed: true,
+        allow_default_cv_matching: true,
         created_at: true,
         auth_providers: {
           select: { provider: true, last_login_at: true },
@@ -147,6 +148,7 @@ export class ProfileService {
         prefer_remote: user.prefer_remote,
         current_step: user.current_step,
         onboarding_completed: user.onboarding_completed,
+        allow_default_cv_matching: user.allow_default_cv_matching,
       },
       auth_providers: user.auth_providers,
       created_at: user.created_at

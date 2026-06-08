@@ -7,10 +7,11 @@ export class LearningRoadmapFilterDto {
 
   @ApiPropertyOptional({
     description:
-      'Cấp độ khóa học gợi ý (All, Beginner, Intermediate, Advanced)',
+      'Trạng thái kỹ năng của khóa học gợi ý (All: Tất cả, Missing: Chưa có kỹ năng, Partial: Có 1 phần kỹ năng)',
+    enum: ['All', 'Missing', 'Partial'],
     default: 'All',
   })
-  level?: string;
+  status?: 'All' | 'Missing' | 'Partial';
 
   @ApiPropertyOptional({
     description: 'Số lượng lộ trình/khóa học tối đa muốn lấy',

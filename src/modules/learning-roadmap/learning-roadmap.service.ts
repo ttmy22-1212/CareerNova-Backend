@@ -30,14 +30,12 @@ export class LearningRoadmapService {
         `Fetching learning roadmap for user: ${userId} with filters: ${JSON.stringify(filters)}`,
       );
 
-      // 1. Truy vấn danh sách ID các khóa học mà User này đã lưu
       const userSaved = await this.prisma.savedCourse.findMany({
         where: { user_id: userId, status: 'saved' },
         select: { course_id: true },
       });
       const savedCourseIds = new Set(userSaved.map((sc) => sc.course_id));
 
-      // 2. Truy vấn dữ liệu Learning Paths (Lấy hết để phục vụ việc search/filter mượt mà như file JSON)
       const pathsFromDB = await this.prisma.learningPath.findMany({
         where: filters.skill
           ? {
@@ -55,14 +53,13 @@ export class LearningRoadmapService {
         },
       });
 
-      // 3. Map dữ liệu Learning Paths khớp format UI
       let learning_paths: LearningPathDto[] = pathsFromDB.map(
         (path, index) => ({
           id: path.path_id,
           title: path.path_title,
           description: path.path_description,
           duration: path.estimated_duration_months,
-          progress: 0, // Nghiệp vụ tối giản: lộ trình chung hiển thị 0% tiến độ
+          progress: 0,
           difficulty: path.path_level,
           icon: this.getPathIcon(path.path_icon),
           color: this.gradients[index % this.gradients.length],
@@ -76,12 +73,12 @@ export class LearningRoadmapService {
               provider: c.provider_name,
               duration: `${c.duration_hours}h`,
               level: 'Intermediate',
-              rating: c.rating ? c.rating.toNumber() : 4.5, // Ép sang number chống lỗi template literal
-              learners: 85000, // Mặc định mock theo UI
-              progress: isSaved ? 100 : 0, // Mẹo: Đã lưu = Đầy thanh 100%, Chưa lưu = 0%
+              rating: c.rating ? c.rating.toNumber() : 4.5,
+              learners: 85000,
+              progress: isSaved ? 100 : 0,
               is_saved: isSaved,
               skills: c.skills_tags || [],
-              price: c.price ? c.price.toNumber() : 0, // Ép sang number chống lỗi template literal
+              price: c.price ? c.price.toNumber() : 0,
               image: c.provider_name === 'Coursera' ? '⚛️' : '🟢',
               source_url: c.source_url || undefined,
             };
@@ -89,12 +86,10 @@ export class LearningRoadmapService {
         }),
       );
 
-      // 4. Truy vấn các khóa học gợi ý độc lập (Recommended Courses)
       const recommendedFromDB = await this.prisma.course.findMany({
         where: { is_recommended: true },
       });
 
-      // 5. Map dữ liệu Recommended Courses khớp format UI
       let recommended_courses: CourseItemDto[] = recommendedFromDB.map(
         (course) => {
           let learnersNum = 45000;
@@ -125,9 +120,6 @@ export class LearningRoadmapService {
         },
       );
 
-      // 🎯 ĐẢM BẢO GIỚI HẠN: Nếu UI không truyền filter gì lên (tức là trạng thái ban đầu),
-      // ta tiến hành .slice(0, 6) giống hệt hành vi file JSON của UI cũ để giao diện gọn gàng.
-      // Nếu có skill (đang filter hoặc search), ta trả về toàn bộ danh sách.
       if (!filters.skill) {
         learning_paths = learning_paths.slice(0, 6);
         recommended_courses = recommended_courses.slice(0, 6);

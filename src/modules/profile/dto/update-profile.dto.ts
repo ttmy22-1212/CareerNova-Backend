@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString, IsBoolean } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateProfileDto {
@@ -11,4 +11,9 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsString()
   avatar_url?: string;
+
+  @ApiProperty({ required: false, description: 'Cho phép tự động đối sánh CV mặc định để gợi ý việc làm' })
+  @IsOptional()
+  @IsBoolean()
+  allow_default_cv_matching?: boolean;
 }

@@ -47,53 +47,39 @@ export class PersonalDashboardService {
 
       const user = await this.prisma.user.findUnique({
         where: { user_id: userId },
-        select: { default_match_id: true, default_cv_id: true },
+        select: { default_match_id: true },
       });
 
-      if (!user || !user.default_match_id || !user.default_cv_id) {
+      if (!user || !user.default_match_id) {
         return { match_score: 0, suitable_jobs_count: 0 };
       }
 
       const defaultMatch = await this.prisma.cvJobMatch.findUnique({
         where: { match_id: user.default_match_id },
-        select: { match_score: true, search_group: true, job_id: true },
+        select: { match_score: true },
       });
 
       if (!defaultMatch) {
         return { match_score: 0, suitable_jobs_count: 0 };
       }
 
-      let highestJobScore = 0;
+      // Đếm toàn bộ job phù hợp >= 70% trong lịch sử matching của user
+      // Đồng nhất với logic getRecommendedJobs (score thang 0–1)
+      const suitableCount = await this.prisma.cvJobMatch.count({
+        where: {
+          cv: { user_id: userId },
+          job_id: { not: null },
+          match_score: { gte: 0.7 },
+        },
+      });
 
-      // LUỒNG XỬ LÝ THEO LOẠI HÌNH MATCHING ĐỂ LẤY GIÁ TRỊ SUITABLE JOBS
-      if (defaultMatch.job_id) {
-        // Luồng 1: Nếu default matching là Job URL cụ thể -> suitable_jobs_count chính là điểm của Job đó
-        highestJobScore = Math.round(Number(defaultMatch.match_score || 0));
-      } else if (defaultMatch.search_group) {
-        // Luồng 2: Nếu default matching là Search Group -> Tìm job có điểm cao nhất trong cùng group
-        const maxMatchJob = await this.prisma.cvJobMatch.findFirst({
-          where: {
-            cv_id: user.default_cv_id,
-            search_group: defaultMatch.search_group,
-            job_id: { not: null },
-          },
-          orderBy: {
-            match_score: 'desc',
-          },
-          select: {
-            match_score: true,
-          },
-        });
-
-        highestJobScore =
-          maxMatchJob && maxMatchJob.match_score
-            ? Math.round(Number(maxMatchJob.match_score))
-            : 0;
-      }
+      const rawScore = Number(defaultMatch.match_score || 0);
+      const matchScore =
+        rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
 
       return {
-        match_score: Math.round(Number(defaultMatch.match_score || 0)),
-        suitable_jobs_count: highestJobScore,
+        match_score: matchScore,
+        suitable_jobs_count: suitableCount,
       };
     } catch (error: unknown) {
       this.handleError(error, 'Get Banner');
@@ -302,90 +288,112 @@ export class PersonalDashboardService {
 
       const user = await this.prisma.user.findUnique({
         where: { user_id: userId },
-        select: { default_match_id: true, default_cv_id: true },
+        select: {
+          default_cv_id: true,
+          allow_default_cv_matching: true,
+        },
       });
 
-      if (!user || !user.default_match_id || !user.default_cv_id) return [];
+      if (!user) return [];
 
-      const defaultMatch = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: user.default_match_id },
-        select: { search_group: true },
-      });
-
-      if (!defaultMatch || !defaultMatch.search_group) return [];
-
-      // 1. Thử tìm từ lịch sử so khớp CV cụ thể với các job trong cùng search_group
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-      const matchedJobs = await this.prisma.cvJobMatch.findMany({
+      // ── BƯỚC 1: Lịch sử matching thủ công với match_score >= 70% ─────────────
+      // Score lưu theo thang 0–1 trong DB
+      const historyMatches = await this.prisma.cvJobMatch.findMany({
         where: {
-          cv_id: user.default_cv_id,
-          search_group: defaultMatch.search_group,
+          cv: { user_id: userId },
           job_id: { not: null },
-          job: {
-            scraped_at: { gte: oneMonthAgo }, // Chốt chặn hiệu năng 1 tháng
-          },
+          match_score: { gte: 0.7 },
         },
         include: {
-          job: {
-            include: { company: true, salaries: true },
-          },
+          job: { include: { company: true, salaries: true } },
         },
-        orderBy: { match_score: 'desc' },
-        // Kéo nhiều hơn một chút để đề phòng sau khi lọc trùng vẫn đủ 5 bản ghi
-        take: 20,
+        orderBy: { created_at: 'desc' },
+        take: 50,
       });
 
-      // LỌC TRÙNG: Chỉ giữ lại lượt so khớp có điểm cao nhất cho mỗi job_id độc nhất
-      const uniqueMatchesMap = new Map<string, (typeof matchedJobs)[0]>();
+      // ── BƯỚC 2: Nếu user bật auto-matching, lấy thêm job cào về hôm nay ─────
+      let todayAutoMatches: typeof historyMatches = [];
+      if (user.allow_default_cv_matching && user.default_cv_id) {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
 
-      matchedJobs.forEach((m) => {
-        if (m.job_id && !uniqueMatchesMap.has(m.job_id.toString())) {
-          uniqueMatchesMap.set(m.job_id.toString(), m);
+        todayAutoMatches = await this.prisma.cvJobMatch.findMany({
+          where: {
+            cv_id: user.default_cv_id,
+            job_id: { not: null },
+            job: { scraped_at: { gte: todayStart } },
+          },
+          include: {
+            job: { include: { company: true, salaries: true } },
+          },
+          orderBy: { created_at: 'desc' },
+          take: 20,
+        });
+      }
+
+      // ── BƯỚC 3: Gộp, dedup theo job_id, sort theo created_at DESC ────────────
+      const combined = [...historyMatches, ...todayAutoMatches];
+      const uniqueMap = new Map<string, (typeof combined)[0]>();
+      for (const m of combined) {
+        if (!m.job_id) continue;
+        const key = m.job_id.toString();
+        if (!uniqueMap.has(key)) {
+          uniqueMap.set(key, m);
         }
-      });
+      }
 
-      // Chuyển map thành mảng phẳng và giới hạn lấy đúng top 5 job phù hợp nhất
-      const validMatches = Array.from(uniqueMatchesMap.values())
+      const getCreatedAtTime = (value: Date | string | null | undefined) =>
+        value ? new Date(value).getTime() : 0;
+
+      const sorted = Array.from(uniqueMap.values())
         .filter((m) => m.job !== null)
-        .slice(0, 5);
+        .sort(
+          (a, b) =>
+            getCreatedAtTime(b.created_at) - getCreatedAtTime(a.created_at),
+        );
 
-      if (validMatches.length > 0) {
-        return validMatches.map((m) => {
+      if (sorted.length > 0) {
+        return sorted.map((m) => {
           const job = m.job!;
           const salary = job.salaries[0];
           let salaryText = 'Thỏa thuận';
           if (salary && (salary.min_salary || salary.max_salary)) {
             salaryText = `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(Number(salary.max_salary || 0))} ${salary.currency || 'VND'}`;
           }
-
+          const rawScore = Number(m.match_score || 0);
+          const scoreDisplay =
+            rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
           return {
             job_id: job.job_id.toString(),
             title: job.title,
             company_name: job.company?.name || 'N/A',
             location: job.location || 'N/A',
-            match_rate: `${Math.round(Number(m.match_score || 0))}% match`,
+            match_rate:
+              scoreDisplay > 0 ? `${scoreDisplay}% match` : 'Xem chi tiết',
             salary_text: salaryText,
           };
         });
       }
 
-      // 2. FALLBACK LUỒNG SEARCH GROUP: Quét thẳng bảng job theo nhóm ngành nếu user chưa từng chạy match job cụ thể nào
+      // ── FALLBACK: Raw jobs theo nhóm ngành nếu chưa có lịch sử matching ─────
+      if (!user.default_cv_id) return [];
+
+      const latestMatch = await this.prisma.cvJobMatch.findFirst({
+        where: { cv_id: user.default_cv_id },
+        orderBy: { created_at: 'desc' },
+        select: { search_group: true },
+      });
+
+      if (!latestMatch?.search_group) return [];
+
       this.logger.log(
-        `No matching history found. Falling back to query raw jobs from group: ${defaultMatch.search_group}`,
+        `No qualifying history. Fallback to raw jobs: ${latestMatch.search_group}`,
       );
 
       const rawJobs = await this.prisma.job.findMany({
-        where: {
-          job_category: defaultMatch.search_group,
-        },
-        include: {
-          company: true,
-          salaries: true,
-        },
-        orderBy: {
-          scraped_at: 'desc', // FIX LỖI: Sửa từ created_at thành scraped_at theo đúng schema.prisma của bạn
-        },
+        where: { job_category: latestMatch.search_group },
+        include: { company: true, salaries: true },
+        orderBy: { scraped_at: 'desc' },
         take: 5,
       });
 
@@ -395,7 +403,6 @@ export class PersonalDashboardService {
         if (salary && (salary.min_salary || salary.max_salary)) {
           salaryText = `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(Number(salary.max_salary || 0))} ${salary.currency || 'VND'}`;
         }
-
         return {
           job_id: job.job_id.toString(),
           title: job.title,
