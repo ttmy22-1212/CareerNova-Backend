@@ -317,6 +317,7 @@ export class ProfileService {
           user_id: true,
           full_name: true,
           avatar_url: true,
+          allow_default_cv_matching: true,
           updated_at: true,
         },
       });
