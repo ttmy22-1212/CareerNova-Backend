@@ -18,6 +18,8 @@ import {
 import * as path from 'path';
 import FormData from 'form-data';
 
+type AnalyzeCvInput = AnalyzeCvDto & { force?: boolean };
+
 interface MatchedSkillDetail {
   skill_id: number;
   skill_name: string;
@@ -117,7 +119,7 @@ export class MatchingService {
   }
 
   async analyzeCv(
-    dto: AnalyzeCvDto,
+    dto: AnalyzeCvInput,
     userId: string,
   ): Promise<CvJobMatchResultDto> {
     try {
@@ -159,7 +161,7 @@ export class MatchingService {
         },
       });
 
-      if (existingMatch) {
+      if (existingMatch && !dto.force) {
         if (
           matchTypeCheck === 'job_group' ||
           (matchTypeCheck === 'cv_job' && existingMatch.job_id)

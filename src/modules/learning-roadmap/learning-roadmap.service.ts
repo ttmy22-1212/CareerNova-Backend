@@ -35,6 +35,7 @@ export class LearningRoadmapService {
         select: { course_id: true },
       });
       const savedCourseIds = new Set(userSaved.map((sc) => sc.course_id));
+      const normalizedLimit = this.normalizeLimit(filters.limit, 6, 50);
 
       const pathsFromDB = await this.prisma.learningPath.findMany({
         where: filters.skill
@@ -86,49 +87,88 @@ export class LearningRoadmapService {
         }),
       );
 
-      const recommendedFromDB = await this.prisma.course.findMany({
-        where: { is_recommended: true },
-      });
-
-      let recommended_courses: CourseItemDto[] = recommendedFromDB.map(
-        (course) => {
-          let learnersNum = 45000;
-          if (course.total_learners?.includes('K')) {
-            learnersNum =
-              parseFloat(course.total_learners.replace('K', '')) * 1000;
-          } else if (!isNaN(Number(course.total_learners))) {
-            learnersNum = Number(course.total_learners);
-          }
-
-          const isSaved = savedCourseIds.has(course.course_id);
-
-          return {
-            id: course.course_id,
-            title: course.course_title,
-            provider: course.provider_name,
-            duration: `${course.duration_hours}h`,
-            level: 'Intermediate',
-            rating: course.rating ? course.rating.toNumber() : 4.5,
-            learners: learnersNum,
-            progress: isSaved ? 100 : 0,
-            is_saved: isSaved,
-            skills: course.skills_tags || [],
-            price: course.price ? course.price.toNumber() : 0,
-            image: course.thumbnail_icon === 'triangle' ? '📘' : '▲',
-            source_url: course.source_url || undefined,
-          };
+      const recommended_courses = await this.getRecommendedCourses(
+        {
+          skill: filters.skill,
+          level: filters.level,
+          limit: filters.limit,
         },
+        userId,
       );
 
       if (!filters.skill) {
-        learning_paths = learning_paths.slice(0, 6);
-        recommended_courses = recommended_courses.slice(0, 6);
+        learning_paths = learning_paths.slice(0, normalizedLimit);
       }
 
       return { learning_paths, recommended_courses };
     } catch (error: unknown) {
       this.logger.error(`Error in getRoadmap: ${(error as Error).message}`);
       throw new BadRequestException('Không thể tải dữ liệu lộ trình học tập');
+    }
+  }
+
+  async getRecommendedCourses(
+    filters: LearningRoadmapFilterDto,
+    userId: string,
+  ): Promise<CourseItemDto[]> {
+    try {
+      this.logger.log(
+        `Fetching recommended courses for user: ${userId} with filters: ${JSON.stringify(filters)}`,
+      );
+
+      const normalizedLimit = this.normalizeLimit(filters.limit, 6, 24);
+      const userSaved = await this.prisma.savedCourse.findMany({
+        where: { user_id: userId, status: 'saved' },
+        select: { course_id: true },
+      });
+      const savedCourseIds = new Set(userSaved.map((sc) => sc.course_id));
+
+      const recommendedFromDB = await this.prisma.course.findMany({
+        where: {
+          is_recommended: true,
+          ...(filters.skill
+            ? {
+                OR: [
+                  {
+                    course_title: {
+                      contains: filters.skill,
+                      mode: 'insensitive',
+                    },
+                  },
+                  {
+                    provider_name: {
+                      contains: filters.skill,
+                      mode: 'insensitive',
+                    },
+                  },
+                  {
+                    skills_tags: {
+                      has: filters.skill,
+                    },
+                  },
+                ],
+              }
+            : {}),
+        },
+        take: 50,
+      });
+
+      let recommendedCourses = recommendedFromDB.map((course) =>
+        this.mapCourseItem(course, savedCourseIds),
+      );
+
+      if (filters.level && filters.level !== 'All') {
+        recommendedCourses = recommendedCourses.filter(
+          (course) => course.level === filters.level,
+        );
+      }
+
+      return recommendedCourses.slice(0, normalizedLimit);
+    } catch (error: unknown) {
+      this.logger.error(
+        `Error in getRecommendedCourses: ${(error as Error).message}`,
+      );
+      throw new BadRequestException('Không thể tải danh sách khóa học gợi ý');
     }
   }
 
@@ -202,5 +242,62 @@ export class LearningRoadmapService {
       default:
         return '📊';
     }
+  }
+
+  private mapCourseItem(
+    course: {
+      course_id: string;
+      course_title: string;
+      provider_name: string;
+      duration_hours: number;
+      rating: { toNumber(): number } | null;
+      total_learners: string | null;
+      price: { toNumber(): number } | null;
+      skills_tags: string[];
+      thumbnail_icon: string | null;
+      source_url: string | null;
+    },
+    savedCourseIds: Set<string>,
+  ): CourseItemDto {
+    const isSaved = savedCourseIds.has(course.course_id);
+
+    return {
+      id: course.course_id,
+      title: course.course_title,
+      provider: course.provider_name,
+      duration: `${course.duration_hours}h`,
+      level: 'Intermediate',
+      rating: course.rating ? course.rating.toNumber() : 4.5,
+      learners: this.parseLearners(course.total_learners),
+      progress: isSaved ? 100 : 0,
+      is_saved: isSaved,
+      skills: course.skills_tags || [],
+      price: course.price ? course.price.toNumber() : 0,
+      image: course.thumbnail_icon === 'triangle' ? '📘' : '▲',
+      source_url: course.source_url || undefined,
+    };
+  }
+
+  private parseLearners(totalLearners: string | null): number {
+    if (totalLearners?.includes('K')) {
+      return parseFloat(totalLearners.replace('K', '')) * 1000;
+    }
+
+    if (!isNaN(Number(totalLearners))) {
+      return Number(totalLearners);
+    }
+
+    return 45000;
+  }
+
+  private normalizeLimit(
+    value: string | number | undefined,
+    fallback: number,
+    max: number,
+  ) {
+    const parsedValue = Number(value);
+    const safeValue = Number.isFinite(parsedValue) ? parsedValue : fallback;
+
+    return Math.min(Math.max(Math.trunc(safeValue), 1), max);
   }
 }

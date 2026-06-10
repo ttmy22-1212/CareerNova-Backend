@@ -12,6 +12,7 @@ import {
   CategoryGapDto,
   RadarSkillPointDto,
   CategoryBreakdownDto,
+  SkillGapLearningRecommendationDto,
 } from './dto/skill-gap.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 
@@ -36,12 +37,36 @@ export class SkillGapController {
   @Get('category-gaps')
   @ApiOperation({
     summary:
-      'Lấy dữ liệu biểu đồ so sánh số lượng kỹ năng thiếu theo danh mục (Giống Dashboard)',
+      'Lấy dữ liệu độ khớp theo danh mục kèm danh sách skill chi tiết từ default matching',
   })
   @ApiResponse({ status: 200, type: [CategoryGapDto] })
-  async getCategoryGaps(@Req() req: AuthenticatedRequest) {
+  async getCategoryGaps(
+    @Req() req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
     const userId = req.user.sub;
-    const data = await this.skillGapService.getCategoryGapsData(userId);
+    const data = await this.skillGapService.getCategoryGapsData(
+      userId,
+      Number(limit),
+    );
+    return { data };
+  }
+
+  @Get('learning-paths')
+  @ApiOperation({
+    summary:
+      'Lấy lộ trình học đề xuất theo các skill thiếu/khớp một phần trong default matching',
+  })
+  @ApiResponse({ status: 200, type: [SkillGapLearningRecommendationDto] })
+  async getLearningPaths(
+    @Req() req: AuthenticatedRequest,
+    @Query('limit') limit?: string,
+  ) {
+    const userId = req.user.sub;
+    const data = await this.skillGapService.getRecommendedLearningPaths(
+      userId,
+      Number(limit),
+    );
     return { data };
   }
 

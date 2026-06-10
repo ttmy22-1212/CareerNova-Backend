@@ -18,6 +18,15 @@ import { RisingSkillItemDto } from './dto/rising-skills-response.dto';
 export class MarketDashboardService {
   private readonly logger = new Logger(MarketDashboardService.name);
   private readonly VND_TO_USD_RATE = 25000; // Tỷ giá quy đổi giả định phục vụ chuẩn hóa tiền tệ
+  private readonly WORK_TYPE_OPTIONS = [
+    { label: 'Toàn bộ loại hình', value: '' },
+    { label: 'Toàn thời gian', value: 'full_time' },
+    { label: 'Bán thời gian', value: 'part_time' },
+    { label: 'Hợp đồng', value: 'contract' },
+    { label: 'Thực tập', value: 'internship' },
+    { label: 'Làm từ xa', value: 'remote' },
+    { label: 'Linh hoạt', value: 'hybrid' },
+  ];
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -38,7 +47,7 @@ export class MarketDashboardService {
       });
 
       const locations = [
-        { label: 'All Regions', value: '' },
+        { label: 'Tất cả khu vực', value: '' },
         ...distinctLocations.map((j) => ({
           label: j.location!,
           value: j.location!,
@@ -47,27 +56,13 @@ export class MarketDashboardService {
 
       // 2. Cấu hình cố định khoảng thời gian theo yêu cầu BA
       const timeRanges = [
-        { label: 'Last 7 days', value: '7days' },
-        { label: 'Last 2 Weeks', value: '14days' },
-        { label: 'Last 1 Month', value: '30days' },
+        { label: '7 ngày gần đây', value: '7days' },
+        { label: '14 ngày gần đây', value: '14days' },
+        { label: '30 ngày gần đây', value: '30days' },
       ];
 
-      // 3. Lấy danh sách hình thức công việc duy nhất từ DB
-      const distinctWorkTypes = await this.prisma.job.findMany({
-        where: {
-          AND: [{ work_type: { not: null } }, { work_type: { not: '' } }],
-        },
-        distinct: ['work_type'],
-        select: { work_type: true },
-      });
-
-      const workTypes = [
-        { label: 'All Types', value: '' },
-        ...distinctWorkTypes.map((j) => ({
-          label: j.work_type!,
-          value: j.work_type!,
-        })),
-      ];
+      // 3. Hình thức công việc dùng value canonical để FE gửi filter ổn định.
+      const workTypes = this.WORK_TYPE_OPTIONS;
 
       return { locations, time_ranges: timeRanges, work_types: workTypes };
     } catch (error: unknown) {
@@ -274,10 +269,10 @@ export class MarketDashboardService {
         filters.time_range === '30days'
       ) {
         scale = 'week';
-        trendMap.set('Week 1', { total: 0, remote: 0 });
-        trendMap.set('Week 2', { total: 0, remote: 0 });
-        trendMap.set('Week 3', { total: 0, remote: 0 });
-        trendMap.set('Week 4', { total: 0, remote: 0 });
+        trendMap.set('Tuần 1', { total: 0, remote: 0 });
+        trendMap.set('Tuần 2', { total: 0, remote: 0 });
+        trendMap.set('Tuần 3', { total: 0, remote: 0 });
+        trendMap.set('Tuần 4', { total: 0, remote: 0 });
       }
 
       // Phân bổ dữ liệu thô vào các mốc trục X
@@ -288,7 +283,8 @@ export class MarketDashboardService {
         if (!job.listed_time) continue;
         const jobDate = new Date(job.listed_time);
         const isRemoteJob =
-          job.is_remote === true || job.work_type === 'Remote';
+          job.is_remote === true ||
+          this.normalizeWorkType(job.work_type) === 'remote';
 
         if (scale === 'day') {
           const label = `${jobDate.getDate().toString().padStart(2, '0')}/${(jobDate.getMonth() + 1).toString().padStart(2, '0')}`;
@@ -299,16 +295,16 @@ export class MarketDashboardService {
           }
         } else {
           const diffDays = Math.floor((nowMs - jobDate.getTime()) / oneDayMs);
-          let weekLabel = 'Week 4';
+          let weekLabel = 'Tuần 4';
 
           if (filters.time_range === '30days') {
-            if (diffDays >= 21) weekLabel = 'Week 1';
-            else if (diffDays >= 14) weekLabel = 'Week 2';
-            else if (diffDays >= 7) weekLabel = 'Week 3';
+            if (diffDays >= 21) weekLabel = 'Tuần 1';
+            else if (diffDays >= 14) weekLabel = 'Tuần 2';
+            else if (diffDays >= 7) weekLabel = 'Tuần 3';
           } else if (filters.time_range === '14days') {
-            if (diffDays >= 10.5) weekLabel = 'Week 1';
-            else if (diffDays >= 7) weekLabel = 'Week 2';
-            else if (diffDays >= 3.5) weekLabel = 'Week 3';
+            if (diffDays >= 10.5) weekLabel = 'Tuần 1';
+            else if (diffDays >= 7) weekLabel = 'Tuần 2';
+            else if (diffDays >= 3.5) weekLabel = 'Tuần 3';
           }
 
           const current = trendMap.get(weekLabel)!;
@@ -335,14 +331,14 @@ export class MarketDashboardService {
   }
 
   /**
-   * API 3: BIỂU ĐỒ TRÒN CƠ CẤU NGÀNH NGHỀ (TRUY VẤN BẮC CẦU 4 BẢNG)
+   * API 3: BIỂU ĐỒ TRÒN PHÂN BỔ CÔNG VIỆC THEO CATEGORY
    */
   async getIndustryBreakdown(
     filters: DashboardFilterDto,
   ): Promise<IndustryItemDto[]> {
     try {
       this.logger.log(
-        `Fetching industry breakdown with filters: ${JSON.stringify(filters)}`,
+        `Fetching category breakdown with filters: ${JSON.stringify(filters)}`,
       );
 
       const { currentStart, currentEnd } = this.calculateTimeBounds(
@@ -350,60 +346,59 @@ export class MarketDashboardService {
       );
       const baseWhere = this.buildBaseWhereCondition(filters);
 
-      // Lấy tất cả các tin tuyển dụng còn hạn thỏa bộ lọc
-      const jobs = await this.prisma.job.findMany({
+      const jobs = await this.prisma.jobSkill.findMany({
         where: {
-          ...baseWhere,
-          listed_time: { gte: currentStart, lte: currentEnd },
-          OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
-          company_id: { not: null },
+          job: {
+            ...baseWhere,
+            listed_time: { gte: currentStart, lte: currentEnd },
+          },
+          skill: {
+            category: { not: null },
+          },
         },
         select: {
-          company: {
+          skill: {
             select: {
-              company_industries: {
-                select: {
-                  industry: { select: { industry_name: true } },
-                },
-              },
+              category: true,
             },
           },
         },
       });
 
-      const industryMap = new Map<string, number>();
-      let totalValidJobs = 0;
+      const categoryMap = new Map<string, number>();
+      let totalValidSkills = 0;
 
-      for (const j of jobs) {
-        const companyIndustries = j.company?.company_industries || [];
-        for (const ci of companyIndustries) {
-          const name = ci.industry?.industry_name;
-          if (name) {
-            industryMap.set(name, (industryMap.get(name) || 0) + 1);
-            totalValidJobs += 1;
-          }
+      for (const js of jobs) {
+        const categoryName = js.skill.category?.trim();
+        if (categoryName) {
+          categoryMap.set(
+            categoryName,
+            (categoryMap.get(categoryName) || 0) + 1,
+          );
+          totalValidSkills += 1;
         }
       }
 
-      // Sắp xếp các ngành theo số lượng giảm dần
-      const sortedIndustries = Array.from(industryMap.entries())
-        .map(([name, count]) => ({
-          industry_name: name,
+      // Sắp xếp category theo số lượng giảm dần
+      const sortedCategories = Array.from(categoryMap.entries())
+        .map(([categoryName, count]) => ({
+          category_name: categoryName,
+          industry_name: categoryName,
           count,
           percentage:
-            totalValidJobs > 0
-              ? Number(((count / totalValidJobs) * 100).toFixed(1))
+            totalValidSkills > 0
+              ? Number(((count / totalValidSkills) * 100).toFixed(1))
               : 0,
         }))
         .sort((a, b) => b.count - a.count);
 
-      // Gom nhóm từ Top 6 trở đi thành "Others"
-      if (sortedIndustries.length <= 6) {
-        return sortedIndustries;
+      // Gom nhóm từ Top 6 trở đi thành "Khác"
+      if (sortedCategories.length <= 6) {
+        return sortedCategories;
       }
 
-      const top6 = sortedIndustries.slice(0, 5);
-      const remaining = sortedIndustries.slice(5);
+      const top6 = sortedCategories.slice(0, 5);
+      const remaining = sortedCategories.slice(5);
 
       let othersCount = 0;
       let othersPercentage = 0;
@@ -413,20 +408,21 @@ export class MarketDashboardService {
       }
 
       top6.push({
-        industry_name: 'Others',
+        category_name: 'Khác',
+        industry_name: 'Khác',
         count: othersCount,
         percentage: Number(othersPercentage.toFixed(1)),
       });
 
       return top6;
     } catch (error: unknown) {
-      this.handleError(error, 'Industry Breakdown');
-      throw new BadRequestException('Could not fetch industry structure');
+      this.handleError(error, 'Category Breakdown');
+      throw new BadRequestException('Could not fetch category structure');
     }
   }
 
   /**
-   * API 4: BIỂU ĐỒ VỊ TRÍ TUYỂN DỤNG HOT (TOP 5 HOT JOBS)
+   * API 4: TOP 5 CÔNG VIỆC ĐƯỢC LƯU NHIỀU NHẤT TRONG 7 NGÀY GẦN NHẤT
    */
   async getHotJobs(filters: DashboardFilterDto): Promise<HotJobItemDto[]> {
     try {
@@ -434,66 +430,91 @@ export class MarketDashboardService {
         `Fetching hot jobs with filters: ${JSON.stringify(filters)}`,
       );
 
-      const { currentStart, currentEnd } = this.calculateTimeBounds(
-        filters.time_range,
-      );
+      const currentEnd = new Date();
+      const currentStart = new Date(currentEnd);
+      currentStart.setDate(currentEnd.getDate() - 7);
       const baseWhere = this.buildBaseWhereCondition(filters);
 
-      // 1. Quét 1 lần lấy Job kèm thông tin Salary luôn
-      const jobsWithSalaries = await this.prisma.job.findMany({
+      const savedJobGroups = await this.prisma.savedJob.groupBy({
+        by: ['job_id'],
         where: {
-          ...baseWhere,
-          listed_time: { gte: currentStart, lte: currentEnd },
-          AND: [{ job_category: { not: null } }, { job_category: { not: '' } }],
-          OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }], // Đã sửa lỗi 1
+          created_at: { gte: currentStart, lte: currentEnd },
+          job: {
+            ...baseWhere,
+            OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
+          },
         },
+        _count: { job_id: true },
+        orderBy: { _count: { job_id: 'desc' } },
+        take: 5,
+      });
+
+      if (savedJobGroups.length === 0) {
+        return [];
+      }
+
+      const jobIds = savedJobGroups.map((item) => item.job_id);
+      const saveCountByJobId = new Map(
+        savedJobGroups.map((item) => [
+          item.job_id.toString(),
+          item._count.job_id,
+        ]),
+      );
+
+      const jobs = await this.prisma.job.findMany({
+        where: { job_id: { in: jobIds } },
         select: {
+          job_id: true,
+          title: true,
           job_category: true,
+          location: true,
+          work_type: true,
+          company: {
+            select: { name: true },
+          },
           salaries: {
             select: { med_salary: true, currency: true, pay_period: true },
           },
         },
       });
 
-      // 2. Phân tích và gom dữ liệu trên RAM
-      const categoryMap = new Map<
-        string,
-        { count: number; totalSalary: number; salaryCount: number }
-      >();
+      const results: HotJobItemDto[] = jobs
+        .map((job) => {
+          const salaryValues = job.salaries
+            .map((salary) =>
+              this.normalizeSalaryValue(
+                Number(salary.med_salary || 0),
+                salary.pay_period,
+                salary.currency,
+              ),
+            )
+            .filter((salary) => salary > 0);
+          const saveCount = saveCountByJobId.get(job.job_id.toString()) || 0;
 
-      for (const job of jobsWithSalaries) {
-        const cat = job.job_category!;
-        if (!categoryMap.has(cat)) {
-          categoryMap.set(cat, { count: 0, totalSalary: 0, salaryCount: 0 });
-        }
-
-        const stats = categoryMap.get(cat)!;
-        stats.count += 1;
-
-        for (const s of job.salaries) {
-          const normMed = this.normalizeSalaryValue(
-            Number(s.med_salary || 0),
-            s.pay_period,
-            s.currency,
-          );
-          if (normMed > 0) {
-            stats.totalSalary += normMed;
-            stats.salaryCount += 1;
+          return {
+            job_id: job.job_id.toString(),
+            title: job.title,
+            company_name: job.company?.name || null,
+            location: job.location,
+            work_type: job.work_type,
+            job_category: job.job_category || 'Khác',
+            save_count: saveCount,
+            job_count: saveCount,
+            avg_salary:
+              salaryValues.length > 0
+                ? Math.round(
+                    salaryValues.reduce((sum, salary) => sum + salary, 0) /
+                      salaryValues.length,
+                  )
+                : 0,
+          };
+        })
+        .sort((a, b) => {
+          if (b.save_count !== a.save_count) {
+            return b.save_count - a.save_count;
           }
-        }
-      }
-
-      // 3. Map kết quả, sắp xếp lấy Top 5
-      const results: HotJobItemDto[] = Array.from(categoryMap.entries())
-        .map(([category, stats]) => ({
-          job_category: category,
-          job_count: stats.count,
-          avg_salary:
-            stats.salaryCount > 0
-              ? Math.round(stats.totalSalary / stats.salaryCount)
-              : 0,
-        }))
-        .sort((a, b) => b.job_count - a.job_count)
+          return b.avg_salary - a.avg_salary;
+        })
         .slice(0, 5);
 
       return results;
@@ -669,6 +690,7 @@ export class MarketDashboardService {
           job: {
             ...baseWhere,
             listed_time: { gte: currentStart, lte: currentEnd },
+            OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
           },
         },
         include: {
@@ -689,6 +711,7 @@ export class MarketDashboardService {
           job: {
             ...baseWhere,
             listed_time: { gte: previousStart, lte: previousEnd },
+            OR: [{ expiry_time: { gte: previousEnd } }, { expiry_time: null }],
           },
         },
         select: { skill_id: true },
@@ -797,14 +820,62 @@ export class MarketDashboardService {
       condition.location = filters.location;
     }
     if (filters.work_type) {
-      if (filters.work_type === 'Remote') {
-        condition.OR = [{ work_type: 'Remote' }, { is_remote: true }];
+      const normalizedWorkType = this.normalizeWorkType(filters.work_type);
+      const workTypeVariants = this.getWorkTypeVariants(normalizedWorkType);
+
+      if (normalizedWorkType === 'remote') {
+        condition.AND = [
+          {
+            OR: [{ work_type: { in: workTypeVariants } }, { is_remote: true }],
+          },
+        ];
       } else {
-        condition.work_type = filters.work_type;
+        condition.work_type = { in: workTypeVariants };
       }
     }
 
     return condition;
+  }
+
+  private normalizeWorkType(value?: string | null): string {
+    const normalizedValue = (value || '').trim().toLowerCase();
+
+    switch (normalizedValue) {
+      case 'full-time':
+      case 'full time':
+      case 'fulltime':
+      case 'full_time':
+        return 'full_time';
+      case 'part-time':
+      case 'part time':
+      case 'parttime':
+      case 'part_time':
+        return 'part_time';
+      case 'contract':
+        return 'contract';
+      case 'internship':
+      case 'intern':
+        return 'internship';
+      case 'remote':
+        return 'remote';
+      case 'hybrid':
+        return 'hybrid';
+      default:
+        return normalizedValue;
+    }
+  }
+
+  private getWorkTypeVariants(workType: string): string[] {
+    const variants: Record<string, string[]> = {
+      full_time: ['full_time', 'Full-time', 'Full Time', 'Fulltime'],
+      part_time: ['part_time', 'Part-time', 'Part Time', 'Parttime'],
+      contract: ['contract', 'Contract'],
+      internship: ['internship', 'Internship', 'Intern'],
+      remote: ['remote', 'Remote'],
+      hybrid: ['hybrid', 'Hybrid'],
+    };
+
+    return variants[workType] || [workType];
   }
 
   /**

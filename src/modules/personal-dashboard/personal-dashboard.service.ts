@@ -1,5 +1,6 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { MatchingService } from '../matching/matching.service';
 import {
   DashboardBannerDto,
   DashboardStatisticsDto,
@@ -39,7 +40,10 @@ interface GapReportStructure {
 export class PersonalDashboardService {
   private readonly logger = new Logger(PersonalDashboardService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly matchingService: MatchingService,
+  ) {}
 
   async getBanner(userId: string): Promise<DashboardBannerDto> {
     try {
@@ -291,131 +295,214 @@ export class PersonalDashboardService {
         select: {
           default_cv_id: true,
           allow_default_cv_matching: true,
+          default_match: {
+            select: {
+              search_group: true,
+            },
+          },
         },
       });
 
-      if (!user) return [];
+      if (!user?.default_cv_id) return [];
 
-      // ── BƯỚC 1: Lịch sử matching thủ công với match_score >= 70% ─────────────
-      // Score lưu theo thang 0–1 trong DB
-      const historyMatches = await this.prisma.cvJobMatch.findMany({
+      const searchGroup =
+        user.default_match?.search_group ||
+        (
+          await this.prisma.cvJobMatch.findFirst({
+            where: {
+              cv_id: user.default_cv_id,
+              search_group: { not: null },
+            },
+            orderBy: { created_at: 'desc' },
+            select: { search_group: true },
+          })
+        )?.search_group ||
+        null;
+
+      if (user.allow_default_cv_matching && searchGroup) {
+        await this.refreshDefaultMatchingIfNeeded(
+          userId,
+          user.default_cv_id,
+          searchGroup,
+        );
+      }
+
+      const matchedJobs = await this.prisma.cvJobMatch.findMany({
         where: {
-          cv: { user_id: userId },
+          cv_id: user.default_cv_id,
           job_id: { not: null },
-          match_score: { gte: 0.7 },
+          OR: [
+            { match_score: { gte: 70 } },
+            {
+              AND: [{ match_score: { gte: 0.7 } }, { match_score: { lte: 1 } }],
+            },
+          ],
         },
         include: {
           job: { include: { company: true, salaries: true } },
         },
-        orderBy: { created_at: 'desc' },
-        take: 50,
       });
 
-      // ── BƯỚC 2: Nếu user bật auto-matching, lấy thêm job cào về hôm nay ─────
-      let todayAutoMatches: typeof historyMatches = [];
-      if (user.allow_default_cv_matching && user.default_cv_id) {
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
+      const uniqueMap = new Map<string, (typeof matchedJobs)[number]>();
+      for (const match of matchedJobs) {
+        if (!match.job_id || !match.job) continue;
 
-        todayAutoMatches = await this.prisma.cvJobMatch.findMany({
-          where: {
-            cv_id: user.default_cv_id,
-            job_id: { not: null },
-            job: { scraped_at: { gte: todayStart } },
-          },
-          include: {
-            job: { include: { company: true, salaries: true } },
-          },
-          orderBy: { created_at: 'desc' },
-          take: 20,
-        });
-      }
+        const key = match.job_id.toString();
+        const current = uniqueMap.get(key);
 
-      // ── BƯỚC 3: Gộp, dedup theo job_id, sort theo created_at DESC ────────────
-      const combined = [...historyMatches, ...todayAutoMatches];
-      const uniqueMap = new Map<string, (typeof combined)[0]>();
-      for (const m of combined) {
-        if (!m.job_id) continue;
-        const key = m.job_id.toString();
-        if (!uniqueMap.has(key)) {
-          uniqueMap.set(key, m);
+        if (
+          !current ||
+          this.normalizeMatchScore(match.match_score) >
+            this.normalizeMatchScore(current.match_score)
+        ) {
+          uniqueMap.set(key, match);
         }
       }
 
-      const getCreatedAtTime = (value: Date | string | null | undefined) =>
-        value ? new Date(value).getTime() : 0;
-
-      const sorted = Array.from(uniqueMap.values())
-        .filter((m) => m.job !== null)
+      return Array.from(uniqueMap.values())
         .sort(
           (a, b) =>
-            getCreatedAtTime(b.created_at) - getCreatedAtTime(a.created_at),
-        );
+            this.getJobPostedTime(b.job, b.created_at) -
+            this.getJobPostedTime(a.job, a.created_at),
+        )
+        .map((match) => {
+          const job = match.job!;
 
-      if (sorted.length > 0) {
-        return sorted.map((m) => {
-          const job = m.job!;
-          const salary = job.salaries[0];
-          let salaryText = 'Thỏa thuận';
-          if (salary && (salary.min_salary || salary.max_salary)) {
-            salaryText = `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(Number(salary.max_salary || 0))} ${salary.currency || 'VND'}`;
-          }
-          const rawScore = Number(m.match_score || 0);
-          const scoreDisplay =
-            rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
           return {
             job_id: job.job_id.toString(),
             title: job.title,
             company_name: job.company?.name || 'N/A',
             location: job.location || 'N/A',
-            match_rate:
-              scoreDisplay > 0 ? `${scoreDisplay}% match` : 'Xem chi tiết',
-            salary_text: salaryText,
+            match_rate: `${this.normalizeMatchScore(match.match_score)}% match`,
+            salary_text: this.formatSalaryText(job.salaries),
           };
         });
-      }
-
-      // ── FALLBACK: Raw jobs theo nhóm ngành nếu chưa có lịch sử matching ─────
-      if (!user.default_cv_id) return [];
-
-      const latestMatch = await this.prisma.cvJobMatch.findFirst({
-        where: { cv_id: user.default_cv_id },
-        orderBy: { created_at: 'desc' },
-        select: { search_group: true },
-      });
-
-      if (!latestMatch?.search_group) return [];
-
-      this.logger.log(
-        `No qualifying history. Fallback to raw jobs: ${latestMatch.search_group}`,
-      );
-
-      const rawJobs = await this.prisma.job.findMany({
-        where: { job_category: latestMatch.search_group },
-        include: { company: true, salaries: true },
-        orderBy: { scraped_at: 'desc' },
-        take: 5,
-      });
-
-      return rawJobs.map((job) => {
-        const salary = job.salaries[0];
-        let salaryText = 'Thỏa thuận';
-        if (salary && (salary.min_salary || salary.max_salary)) {
-          salaryText = `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(Number(salary.max_salary || 0))} ${salary.currency || 'VND'}`;
-        }
-        return {
-          job_id: job.job_id.toString(),
-          title: job.title,
-          company_name: job.company?.name || 'N/A',
-          location: job.location || 'N/A',
-          match_rate: 'Xem chi tiết',
-          salary_text: salaryText,
-        };
-      });
     } catch (error: unknown) {
       this.handleError(error, 'Get Recommended Jobs');
       return [];
     }
+  }
+
+  private async refreshDefaultMatchingIfNeeded(
+    userId: string,
+    cvId: string,
+    searchGroup: string,
+  ): Promise<void> {
+    try {
+      const { startYesterday, endToday } = this.getTodayAndYesterdayBounds();
+
+      const latestRecentJob = await this.prisma.job.findFirst({
+        where: {
+          AND: [
+            {
+              OR: [
+                { search_group: searchGroup },
+                { job_category: searchGroup },
+              ],
+            },
+            {
+              OR: [
+                { listed_time: { gte: startYesterday, lt: endToday } },
+                {
+                  AND: [
+                    { listed_time: null },
+                    { scraped_at: { gte: startYesterday, lt: endToday } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        orderBy: [{ scraped_at: 'desc' }, { listed_time: 'desc' }],
+        select: {
+          listed_time: true,
+          scraped_at: true,
+        },
+      });
+
+      if (!latestRecentJob) return;
+
+      const latestMatch = await this.prisma.cvJobMatch.findFirst({
+        where: {
+          cv_id: cvId,
+          search_group: searchGroup,
+        },
+        orderBy: { created_at: 'desc' },
+        select: {
+          created_at: true,
+        },
+      });
+
+      const latestJobTime = Math.max(
+        this.getTime(latestRecentJob.listed_time),
+        this.getTime(latestRecentJob.scraped_at),
+      );
+      const latestMatchTime = this.getTime(latestMatch?.created_at);
+
+      if (latestMatchTime >= latestJobTime) return;
+
+      await this.matchingService.analyzeCv(
+        {
+          cv_id: cvId,
+          search_group: searchGroup,
+          force: true,
+        },
+        userId,
+      );
+    } catch (error: unknown) {
+      this.handleError(error, 'Refresh Default Matching');
+    }
+  }
+
+  private getTodayAndYesterdayBounds(): {
+    startYesterday: Date;
+    endToday: Date;
+  } {
+    const startToday = new Date();
+    startToday.setHours(0, 0, 0, 0);
+
+    const startYesterday = new Date(startToday);
+    startYesterday.setDate(startToday.getDate() - 1);
+
+    const endToday = new Date(startToday);
+    endToday.setDate(startToday.getDate() + 1);
+
+    return { startYesterday, endToday };
+  }
+
+  private normalizeMatchScore(score: unknown): number {
+    const rawScore = Number(score || 0);
+    const normalizedScore = rawScore <= 1 ? rawScore * 100 : rawScore;
+
+    return Math.round(normalizedScore);
+  }
+
+  private getJobPostedTime(
+    job: { listed_time?: Date | null; scraped_at?: Date | null } | null,
+    fallbackDate?: Date | null,
+  ): number {
+    return this.getTime(job?.listed_time || job?.scraped_at || fallbackDate);
+  }
+
+  private getTime(value: Date | string | null | undefined): number {
+    return value ? new Date(value).getTime() : 0;
+  }
+
+  private formatSalaryText(
+    salaries: Array<{
+      min_salary: unknown;
+      max_salary: unknown;
+      currency: string | null;
+    }>,
+  ): string {
+    const salary = salaries[0];
+    if (!salary || (!salary.min_salary && !salary.max_salary)) {
+      return 'Thỏa thuận';
+    }
+
+    return `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(
+      Number(salary.max_salary || 0),
+    )} ${salary.currency || 'VND'}`;
   }
 
   async getProgressData(userId: string): Promise<DashboardProgressDto> {

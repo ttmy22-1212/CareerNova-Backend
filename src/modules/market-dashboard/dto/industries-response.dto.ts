@@ -1,5 +1,6 @@
 export class IndustryItemDto {
-  industry_name: string;
+  category_name: string;
+  industry_name?: string;
   count: number;
   percentage: number;
 }

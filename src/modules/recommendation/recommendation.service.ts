@@ -1,9 +1,24 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  PrioritySkillDto,
   RecommendedJobDto,
   SavedReportItemDto,
 } from './dto/recommendation.dto';
+
+interface GapSkillDetail {
+  skill_id: number | string;
+  skill_name: string;
+  weight?: number | string;
+  similarity?: number | string;
+  gap?: number | string;
+  category?: string;
+}
+
+interface GapReportStructure {
+  partially_matched_skills?: GapSkillDetail[];
+  missing_skills?: GapSkillDetail[];
+}
 
 @Injectable()
 export class RecommendationService {
@@ -204,6 +219,127 @@ export class RecommendationService {
     }
   }
 
+  async getPrioritySkills(
+    userId: string,
+    limit = 4,
+  ): Promise<PrioritySkillDto[]> {
+    try {
+      this.logger.log(`Fetching priority skills for user: ${userId}`);
+
+      const normalizedLimit = this.normalizeLimit(limit, 4, 10);
+      const user = await this.prisma.user.findUnique({
+        where: { user_id: userId },
+        select: { default_match_id: true },
+      });
+
+      if (!user?.default_match_id) return [];
+
+      const defaultMatch = await this.prisma.cvJobMatch.findUnique({
+        where: { match_id: user.default_match_id },
+        select: {
+          gap_report: true,
+          search_group: true,
+        },
+      });
+
+      if (!defaultMatch?.gap_report) return [];
+
+      const gapReport =
+        defaultMatch.gap_report as unknown as GapReportStructure;
+      const missingSkills = (gapReport.missing_skills || []).map((skill) =>
+        this.mapGapSkill(skill, 'Missing' as const),
+      );
+      const partialSkills = (gapReport.partially_matched_skills || []).map(
+        (skill) => this.mapGapSkill(skill, 'Partial' as const),
+      );
+
+      const uniqueSkills = new Map<
+        number,
+        (typeof missingSkills | typeof partialSkills)[number]
+      >();
+
+      for (const skill of [...missingSkills, ...partialSkills]) {
+        if (!skill.skill_id || !skill.skill_name) continue;
+
+        const current = uniqueSkills.get(skill.skill_id);
+        if (
+          !current ||
+          skill.status === 'Missing' ||
+          skill.weight > current.weight
+        ) {
+          uniqueSkills.set(skill.skill_id, skill);
+        }
+      }
+
+      const targetSkills = Array.from(uniqueSkills.values());
+      if (targetSkills.length === 0) return [];
+
+      const skillIds = targetSkills.map((skill) => skill.skill_id);
+      const [skills, jobCounts] = await Promise.all([
+        this.prisma.skill.findMany({
+          where: { skill_id: { in: skillIds } },
+          select: {
+            skill_id: true,
+            category: true,
+          },
+        }),
+        this.prisma.jobSkill.groupBy({
+          by: ['skill_id'],
+          where: {
+            skill_id: { in: skillIds },
+            job: {
+              OR: [{ expiry_time: { gte: new Date() } }, { expiry_time: null }],
+            },
+          },
+          _count: { job_id: true },
+        }),
+      ]);
+
+      const categoryBySkillId = new Map(
+        skills.map((skill) => [skill.skill_id, skill.category]),
+      );
+      const jobCountBySkillId = new Map(
+        jobCounts.map((item) => [item.skill_id, item._count.job_id]),
+      );
+
+      return targetSkills
+        .map((skill) => {
+          const jobCount = jobCountBySkillId.get(skill.skill_id) || 0;
+          const category =
+            skill.category || categoryBySkillId.get(skill.skill_id) || null;
+
+          return {
+            skill_id: skill.skill_id,
+            skill_name: skill.skill_name,
+            category,
+            status: skill.status,
+            priority: this.getPriority(skill.status, skill.weight, jobCount),
+            weight: Number(skill.weight.toFixed(4)),
+            similarity: Number(skill.similarity.toFixed(4)),
+            job_count: jobCount,
+            reason: `${jobCount.toLocaleString('vi-VN')} công việc đang yêu cầu kỹ năng này`,
+            impact:
+              jobCount > 0
+                ? `Có thể mở thêm ${jobCount.toLocaleString('vi-VN')} cơ hội phù hợp hơn`
+                : 'Cải thiện điểm khớp trong nhóm nghề mục tiêu',
+            timeframe: this.getTimeframe(skill.status, skill.weight),
+          };
+        })
+        .sort((a, b) => {
+          const priorityDiff =
+            this.getPriorityRank(b.priority) - this.getPriorityRank(a.priority);
+          if (priorityDiff !== 0) return priorityDiff;
+
+          if (b.job_count !== a.job_count) return b.job_count - a.job_count;
+          return b.weight - a.weight;
+        })
+        .slice(0, normalizedLimit);
+    } catch (error: unknown) {
+      this.handleError(error, 'Get Priority Skills');
+      throw new BadRequestException('Could not fetch priority skills');
+    }
+  }
+
   /**
    * 2. LẤY DANH SÁCH BÁO CÁO ĐÃ LƯU (SAVED REPORTS)
    */
@@ -263,5 +399,64 @@ export class RecommendationService {
       `RecommendationService ${context} failed: ${message}`,
       stack,
     );
+  }
+
+  private mapGapSkill(skill: GapSkillDetail, status: 'Missing' | 'Partial') {
+    const similarity =
+      status === 'Missing' ? 0 : this.normalizeSimilarity(skill.similarity);
+
+    return {
+      skill_id: Number(skill.skill_id),
+      skill_name: skill.skill_name,
+      weight: Number(skill.weight || 0),
+      similarity,
+      category: skill.category,
+      status,
+    };
+  }
+
+  private normalizeSimilarity(value?: number | string): number {
+    const similarity = Number(value || 0);
+    if (!Number.isFinite(similarity)) return 0;
+
+    return similarity > 1 ? similarity / 100 : similarity;
+  }
+
+  private normalizeLimit(value: unknown, defaultValue: number, max: number) {
+    const parsedValue = Number(value);
+    const safeValue = Number.isFinite(parsedValue) ? parsedValue : defaultValue;
+
+    return Math.min(Math.max(Math.trunc(safeValue), 1), max);
+  }
+
+  private getPriority(
+    status: 'Missing' | 'Partial',
+    weight: number,
+    jobCount: number,
+  ): 'critical' | 'high' | 'medium' | 'low' {
+    if (status === 'Missing' && (weight >= 0.5 || jobCount >= 100)) {
+      return 'critical';
+    }
+    if (weight >= 0.25 || jobCount >= 50) return 'high';
+    if (weight >= 0.1 || jobCount >= 10) return 'medium';
+    return 'low';
+  }
+
+  private getPriorityRank(priority: 'critical' | 'high' | 'medium' | 'low') {
+    const rank = {
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
+
+    return rank[priority];
+  }
+
+  private getTimeframe(status: 'Missing' | 'Partial', weight: number): string {
+    if (status === 'Partial') return weight >= 0.25 ? '2-4 tuần' : '1-2 tuần';
+    if (weight >= 0.5) return '2-3 tháng';
+    if (weight >= 0.25) return '1-2 tháng';
+    return '3-4 tuần';
   }
 }

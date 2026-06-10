@@ -208,7 +208,7 @@ export class AuthService {
     };
   }
 
-  getGoogleAuthUrl() {
+  getGoogleAuthUrl(): IBaseResponse<{ url: string }> {
     this.logger.log('Generating Google Auth URL');
     const clientId = this.configService.get<string>('GOOGLE_CLIENT_ID');
     const redirectUri = this.configService.get<string>('GOOGLE_REDIRECT_URI');
@@ -222,7 +222,10 @@ export class AuthService {
       `&access_type=offline` +
       `&prompt=consent`;
 
-    return { url };
+    return {
+      message: 'GOOGLE_AUTH_URL_GENERATED',
+      data: { url },
+    };
   }
 
   async googleLogin(code: string): Promise<IBaseResponse<any>> {

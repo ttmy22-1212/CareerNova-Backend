@@ -25,14 +25,37 @@ export class DashboardFilterDto {
 
   @ApiPropertyOptional({
     description: 'Hình thức/Chế độ làm việc công việc',
-    enum: ['Full-time', 'Remote', 'Hybrid', 'Part-time', 'Contract'],
-    example: 'Remote',
+    enum: [
+      'full_time',
+      'part_time',
+      'contract',
+      'internship',
+      'remote',
+      'hybrid',
+    ],
+    example: 'remote',
   })
   @IsOptional()
   @IsString()
-  @IsIn(['Full-time', 'Remote', 'Hybrid', 'Part-time', 'Contract'], {
-    message:
-      'work_type phải là một trong các hình thức: Full-time, Remote, Hybrid, Part-time, Contract',
-  })
+  @IsIn(
+    [
+      'full_time',
+      'part_time',
+      'contract',
+      'internship',
+      'remote',
+      'hybrid',
+      'Full-time',
+      'Part-time',
+      'Contract',
+      'Internship',
+      'Remote',
+      'Hybrid',
+    ],
+    {
+      message:
+        'work_type phải là một trong các hình thức: full_time, part_time, contract, internship, remote, hybrid',
+    },
+  )
   work_type?: string;
 }

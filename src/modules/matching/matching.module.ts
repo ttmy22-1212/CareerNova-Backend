@@ -5,5 +5,6 @@ import { MatchingController } from './matching.controller';
 @Module({
   controllers: [MatchingController],
   providers: [MatchingService],
+  exports: [MatchingService],
 })
 export class MatchingModule {}

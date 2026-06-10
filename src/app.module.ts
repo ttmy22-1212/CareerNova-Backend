@@ -8,7 +8,6 @@ import { AuthModule } from './modules/auth/auth.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { JobModule } from './modules/job/job.module';
 import { CvModule } from './modules/cv/cv.module';
-import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { SalaryInsightsModule } from './modules/salary-insights/salary-insights.module';
 import { MarketDashboardModule } from './modules/market-dashboard/market-dashboard.module';
 import { MatchingModule } from './modules/matching/matching.module';
@@ -26,7 +25,6 @@ import { LearningRoadmapModule } from './modules/learning-roadmap/learning-roadm
     ProfileModule,
     JobModule,
     CvModule,
-    DashboardModule,
     SalaryInsightsModule,
     MarketDashboardModule,
     MatchingModule,

@@ -42,3 +42,41 @@ export class SavedReportItemDto {
   @ApiProperty({ example: '6e368daa-075f-466f-ba1e-4e4fade5b42a' })
   cv_id: string;
 }
+
+export class PrioritySkillDto {
+  @ApiProperty({ example: 42 })
+  skill_id: number;
+
+  @ApiProperty({ example: 'Docker' })
+  skill_name: string;
+
+  @ApiProperty({ example: 'DevOps & Cloud', nullable: true })
+  category: string | null;
+
+  @ApiProperty({ example: 'Missing', enum: ['Missing', 'Partial'] })
+  status: 'Missing' | 'Partial';
+
+  @ApiProperty({
+    example: 'high',
+    enum: ['critical', 'high', 'medium', 'low'],
+  })
+  priority: 'critical' | 'high' | 'medium' | 'low';
+
+  @ApiProperty({ example: 0.42 })
+  weight: number;
+
+  @ApiProperty({ example: 0.35 })
+  similarity: number;
+
+  @ApiProperty({ example: 128 })
+  job_count: number;
+
+  @ApiProperty({ example: '128 công việc đang yêu cầu kỹ năng này' })
+  reason: string;
+
+  @ApiProperty({ example: 'Có thể mở thêm 128 cơ hội phù hợp hơn' })
+  impact: string;
+
+  @ApiProperty({ example: '1-2 tháng' })
+  timeframe: string;
+}

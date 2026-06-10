@@ -1,4 +1,4 @@
-import { Controller, Get, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -8,6 +8,7 @@ import {
 import { RecommendationService } from './recommendation.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
+  PrioritySkillDto,
   RecommendedJobDto,
   SavedReportItemDto,
 } from './dto/recommendation.dto';
@@ -29,6 +30,23 @@ export class RecommendationController {
     const userId = req.user.sub;
     const data =
       await this.recommendationService.getRecentRecommendedJobs(userId);
+    return { data };
+  }
+
+  @Get('priority-skills')
+  @ApiOperation({
+    summary: 'Lấy danh sách kỹ năng thiếu/khớp một phần cần ưu tiên phát triển',
+  })
+  @ApiResponse({ status: 200, type: [PrioritySkillDto] })
+  async getPrioritySkills(
+    @Req() req: AuthenticatedRequest,
+    @Query('limit') limit?: number,
+  ) {
+    const userId = req.user.sub;
+    const data = await this.recommendationService.getPrioritySkills(
+      userId,
+      limit,
+    );
     return { data };
   }
 

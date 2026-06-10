@@ -132,7 +132,7 @@ export class ProfileController {
     )
     file: Express.Multer.File,
   ) {
-    return await this.profileService.uploadAvatar(req.user.sub, file);
+    return { data: await this.profileService.uploadAvatar(req.user.sub, file) };
   }
 
   @Get('activity')
@@ -150,14 +150,14 @@ export class ProfileController {
   }
 
   @Delete('me')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Xóa vĩnh viễn tài khoản (Hard delete)' })
   @ApiResponse({
-    status: HttpStatus.NO_CONTENT,
+    status: HttpStatus.OK,
     description: 'Tài khoản đã được xóa.',
   })
   async deleteAccount(@Req() req: AuthenticatedRequest) {
-    return await this.profileService.deleteAccount(req.user.sub);
+    return { data: await this.profileService.deleteAccount(req.user.sub) };
   }
 
   @Get('saved-courses')

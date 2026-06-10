@@ -1,5 +1,5 @@
 export class FilterOptionDto {
-  label: string; // Nhãn hiển thị trên UI (Ví dụ: "Last 7 days" hoặc "San Francisco")
+  label: string; // Nhãn hiển thị trên UI (Ví dụ: "7 ngày gần đây" hoặc "San Francisco")
   value: string; // Giá trị thực tế gửi lên API khi filter (Ví dụ: "7days" hoặc "San Francisco")
 }
 

@@ -15,6 +15,7 @@ import {
 } from '@nestjs/swagger';
 import { LearningRoadmapService } from './learning-roadmap.service';
 import {
+  CourseItemDto,
   LearningRoadmapFilterDto,
   LearningRoadmapResponseDto,
   SavedCourseActionDto,
@@ -37,6 +38,20 @@ export class LearningRoadmapController {
     @Req() req: AuthenticatedRequest,
   ) {
     return this.roadmapService.getRoadmap(filters, req.user.sub);
+  }
+
+  @Get('recommended-courses')
+  @ApiOperation({ summary: 'Lấy danh sách khóa học gợi ý có thể tái sử dụng' })
+  @ApiResponse({ status: 200, type: [CourseItemDto] })
+  async getRecommendedCourses(
+    @Query() filters: LearningRoadmapFilterDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const data = await this.roadmapService.getRecommendedCourses(
+      filters,
+      req.user.sub,
+    );
+    return { data };
   }
 
   @Post('toggle-save')

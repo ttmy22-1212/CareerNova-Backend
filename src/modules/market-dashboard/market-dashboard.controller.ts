@@ -48,7 +48,7 @@ export class MarketDashboardController {
 
   @Get('industries')
   @ApiOperation({
-    summary: 'Cơ cấu tỷ lệ tuyển dụng theo ngành nghề (Industry Breakdown)',
+    summary: 'Cơ cấu tỷ lệ tuyển dụng theo category công việc',
   })
   @ApiResponse({ status: 200, type: [IndustryBreakdownResponseDto] })
   async getIndustryBreakdown(@Query() filters: DashboardFilterDto) {

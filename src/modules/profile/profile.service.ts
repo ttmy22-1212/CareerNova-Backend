@@ -5,6 +5,7 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -17,7 +18,16 @@ import * as streamifier from 'streamifier';
 export class ProfileService {
   private readonly logger = new Logger(ProfileService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private readonly configService: ConfigService,
+  ) {
+    cloudinary.config({
+      cloud_name: this.configService.get<string>('CLOUDINARY_CLOUD_NAME'),
+      api_key: this.configService.get<string>('CLOUDINARY_API_KEY'),
+      api_secret: this.configService.get<string>('CLOUDINARY_API_SECRET'),
+    });
+  }
 
   async getMe(userId: string) {
     this.logger.log(`Fetching profile data for user ID: ${userId}`);
@@ -646,18 +656,35 @@ export class ProfileService {
 
   async uploadAvatar(userId: string, file: Express.Multer.File) {
     try {
+      if (!file) {
+        throw new BadRequestException('AVATAR_FILE_IS_REQUIRED');
+      }
+
+      const originalname = Buffer.from(file.originalname, 'latin1').toString(
+        'utf8',
+      );
+      file.originalname = originalname;
+
       this.logger.log(
         `User ID ${userId} is uploading a new avatar: ${file.originalname}`,
       );
 
       // 1. Upload file ảnh lên Cloudinary bằng Stream
       const result = await this.uploadAvatarToCloudinary(file);
+      const avatarUrl = result.secure_url || result.url;
+
+      if (!avatarUrl) {
+        this.logger.error(
+          `Cloudinary upload succeeded but did not return an avatar URL for user ${userId}`,
+        );
+        throw new BadRequestException('AVATAR_URL_MISSING_FROM_STORAGE');
+      }
 
       // 2. Cập nhật đường dẫn URL mới nhận được từ Cloudinary vào DB
       const updatedUser = await this.prisma.user.update({
         where: { user_id: userId },
         data: {
-          avatar_url: result.secure_url,
+          avatar_url: avatarUrl,
           updated_at: new Date(),
         },
         select: {
@@ -671,9 +698,14 @@ export class ProfileService {
 
       return {
         message: 'AVATAR_UPLOADED_SUCCESSFULLY',
+        avatar_url: updatedUser.avatar_url,
         url: updatedUser.avatar_url,
       };
     } catch (error: unknown) {
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+
       const message = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`Avatar upload failed for user ${userId}: ${message}`);
       throw new BadRequestException('Could not upload avatar image to storage');
