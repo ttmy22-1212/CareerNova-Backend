@@ -6,7 +6,9 @@ import {
   Get,
   Query,
   HttpCode,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto, RegisterResponseDto } from './dto/register.dto';
@@ -15,6 +17,7 @@ import { LoginDto, LoginResponseDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { DeleteAccountRequestDto } from './dto/delete-account-request.dto';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -79,8 +82,18 @@ export class AuthController {
 
   // callback from Google
   @Get('google/callback')
-  async googleCallback(@Query('code') code: string) {
-    return this.authService.googleLogin(code);
+  async googleCallback(@Query('code') code: string, @Res() res: Response) {
+    const result = await this.authService.googleLogin(code);
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+    if (result?.data) {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const { access_token, refresh_token } = result.data;
+      const redirectUrl = `${frontendUrl}/auth/google/callback?access_token=${encodeURIComponent(access_token)}&refresh_token=${encodeURIComponent(refresh_token)}`;
+      return res.redirect(redirectUrl);
+    }
+
+    return res.redirect(`${frontendUrl}/auth/login?error=google_failed`);
   }
 
   // @Get('facebook')
@@ -129,5 +142,32 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async refreshToken(@Body() dto: RefreshTokenDto) {
     return this.authService.refreshToken(dto.refresh_token);
+  }
+
+  @Post('request-delete-account')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Yêu cầu xoá tài khoản (guest flow)',
+    description:
+      'Gửi email xác nhận xoá tài khoản. Luôn trả về 200 để tránh dò email.',
+  })
+  async requestDeleteAccount(@Body() dto: DeleteAccountRequestDto) {
+    return this.authService.requestDeleteAccount(dto);
+  }
+
+  @Get('confirm-delete-account')
+  async confirmDeleteAccount(
+    @Query('token') token: string,
+    @Res() res: Response,
+  ) {
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    try {
+      await this.authService.confirmDeleteAccount(token);
+      return res.redirect(`${frontendUrl}/delete-account/confirmed`);
+    } catch {
+      return res.redirect(
+        `${frontendUrl}/delete-account/confirmed?error=invalid_token`,
+      );
+    }
   }
 }

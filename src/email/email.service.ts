@@ -210,6 +210,99 @@ export class EmailService {
     return { success: true };
   }
 
+  async sendDeleteAccountConfirmationEmail(email: string, token: string) {
+    const confirmUrl = `${process.env.FRONTEND_URL}/delete-account/confirm?token=${token}`;
+
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          line-height: 1.6;
+          color: #334155;
+          max-width: 600px;
+          margin: 0 auto;
+          padding: 20px;
+          background-color: #f8fafc;
+        }
+        .container {
+          background: linear-gradient(135deg, #fff1f2 0%, #fee2e2 100%);
+          border-radius: 24px;
+          padding: 40px;
+          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        .logo { text-align: center; margin-bottom: 30px; }
+        .logo h1 { color: #991b1b; font-size: 32px; margin: 0; letter-spacing: -1px; }
+        .content {
+          background: white;
+          border-radius: 16px;
+          padding: 35px;
+          margin-bottom: 20px;
+          border: 1px solid #fecaca;
+        }
+        .title { font-size: 20px; font-weight: 700; color: #1e293b; margin-top: 0; }
+        .button-container { text-align: center; margin: 30px 0; }
+        .button {
+          display: inline-block;
+          padding: 16px 45px;
+          background-color: #dc2626;
+          color: #ffffff !important;
+          text-decoration: none;
+          border-radius: 12px;
+          font-weight: bold;
+          font-size: 16px;
+        }
+        .warning-box {
+          background: #fffbeb;
+          border-left: 4px solid #f59e0b;
+          padding: 15px;
+          margin-top: 25px;
+          border-radius: 8px;
+          font-size: 13px;
+          color: #92400e;
+        }
+        .footer { text-align: center; color: #64748b; font-size: 13px; margin-top: 25px; }
+        .link-alt { word-break: break-all; color: #dc2626; font-size: 12px; margin-top: 10px; display: block; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <div class="logo"><h1>🚀 CareerNova</h1></div>
+        <div class="content">
+          <h2 class="title">Xác nhận xoá tài khoản</h2>
+          <p>Chào bạn,</p>
+          <p>Chúng tôi nhận được yêu cầu <strong>xoá vĩnh viễn</strong> tài khoản CareerNova gắn với địa chỉ email này.</p>
+          <p>Nhấn vào nút bên dưới để xác nhận. Sau khi xác nhận, toàn bộ dữ liệu của bạn (hồ sơ, CV, lịch sử phân tích) sẽ bị xoá và <strong>không thể khôi phục</strong>.</p>
+          <div class="button-container">
+            <a href="${confirmUrl}" class="button">Xác nhận xoá tài khoản</a>
+          </div>
+          <p>Hoặc sao chép liên kết sau vào trình duyệt:</p>
+          <a href="${confirmUrl}" class="link-alt">${confirmUrl}</a>
+          <div class="warning-box">
+            <strong>Không phải bạn yêu cầu?</strong> Bỏ qua email này — tài khoản của bạn hoàn toàn an toàn. Liên kết hết hạn sau <strong>24 giờ</strong>.
+          </div>
+        </div>
+        <div class="footer">
+          <p>© 2026 CareerNova. All rights reserved.</p>
+          <p>District 1, Ho Chi Minh City, Vietnam</p>
+        </div>
+      </div>
+    </body>
+    </html>
+    `;
+
+    await this.sendEmailViaAPI(
+      email,
+      '⚠️ Xác nhận xoá tài khoản CareerNova',
+      htmlContent,
+    );
+    this.logger.log(`Delete account confirmation email sent to ${email}`);
+    return { success: true };
+  }
+
   async sendPasswordResetEmail(email: string, resetToken: string) {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
 

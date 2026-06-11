@@ -23,6 +23,7 @@ import { LoginDto, LoginResponseDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RefreshTokenResponseDto } from './dto/refresh-token.dto';
+import { DeleteAccountRequestDto } from './dto/delete-account-request.dto';
 
 @Injectable()
 export class AuthService {
@@ -627,6 +628,65 @@ export class AuthService {
 
       throw new UnauthorizedException('AUTH_INVALID_REFRESH_TOKEN');
     }
+  }
+
+  async requestDeleteAccount(
+    dto: DeleteAccountRequestDto,
+  ): Promise<IBaseResponse<null>> {
+    const { email } = dto;
+    this.logger.log(`Delete account request received for email: ${email}`);
+
+    const user = await this.prisma.user.findUnique({ where: { email } });
+
+    if (user) {
+      const deleteToken = crypto.randomBytes(32).toString('hex');
+      const expires = new Date();
+      expires.setHours(expires.getHours() + 24);
+
+      await this.prisma.user.update({
+        where: { user_id: user.user_id },
+        data: {
+          verify_token: deleteToken,
+          verify_token_expires: expires,
+        },
+      });
+
+      await this.mailService.sendDeleteAccountConfirmationEmail(
+        email,
+        deleteToken,
+      );
+    }
+
+    // Always return generic success to prevent email enumeration
+    return {
+      message:
+        'Nếu email tồn tại trong hệ thống, bạn sẽ nhận được email xác nhận để hoàn tất việc xoá tài khoản.',
+    };
+  }
+
+  async confirmDeleteAccount(token: string): Promise<IBaseResponse<null>> {
+    this.logger.log(`Confirming account deletion with token: ${token}`);
+
+    const user = await this.prisma.user.findFirst({
+      where: {
+        verify_token: token,
+        verify_token_expires: { gte: new Date() },
+      },
+    });
+
+    if (!user) {
+      this.logger.warn(
+        `Delete account confirmation failed: invalid or expired token`,
+      );
+      throw new BadRequestException('AUTH_INVALID_DELETE_TOKEN');
+    }
+
+    await this.prisma.user.delete({ where: { user_id: user.user_id } });
+
+    this.logger.log(
+      `Account permanently deleted for user: ${user.user_id} (${user.email})`,
+    );
+    return { message: 'ACCOUNT_DELETED_PERMANENTLY' };
   }
 
   private async generateTokens(user: User): Promise<IAuthResult> {
