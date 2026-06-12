@@ -8,6 +8,8 @@ import {
   CategoryGapDto,
   RecentActivityDto,
   DashboardProgressDto,
+  JourneyProgressDto,
+  JourneyStageDto,
 } from './dto/personal-dashboard.dto';
 
 interface MatchedSkillDetail {
@@ -587,6 +589,93 @@ export class PersonalDashboardService {
     } catch (error: unknown) {
       this.handleError(error, 'Get Progress Data');
       throw new BadRequestException('Could not fetch progress dashboard data');
+    }
+  }
+
+  async getJourneyProgress(userId: string): Promise<JourneyProgressDto> {
+    try {
+      this.logger.log(`Fetching journey progress for user: ${userId}`);
+
+      const user = await this.prisma.user.findUnique({
+        where: { user_id: userId },
+        include: {
+          cvs: { orderBy: { uploaded_at: 'desc' }, take: 1 },
+          saved_jobs: { select: { saved_job_id: true } },
+          saved_courses: { select: { course_id: true } },
+        },
+      });
+
+      if (!user) {
+        throw new BadRequestException('User not found');
+      }
+
+      // Explore: xác định ngành + định hướng + hoàn thành onboarding quiz
+      const exploreScore =
+        (user.major || user.school ? 33 : 0) +
+        (user.orientation ? 33 : 0) +
+        (user.onboarding_completed ? 34 : 0);
+
+      // Analyze: upload CV + CV đã được phân tích (có ít nhất 1 match)
+      const hasCV = user.cvs.length > 0;
+      let hasMatch = false;
+      if (hasCV) {
+        const matchCount = await this.prisma.cvJobMatch.count({
+          where: { cv: { user_id: userId } },
+        });
+        hasMatch = matchCount > 0;
+      }
+      const analyzeScore = (hasCV ? 50 : 0) + (hasMatch ? 50 : 0);
+
+      // Plan: đã lưu ít nhất 1 khóa học + đặt mục tiêu nghề nghiệp
+      const hasSavedCourse = user.saved_courses.length > 0;
+      const planScore = (hasSavedCourse ? 60 : 0) + (user.objective ? 40 : 0);
+
+      // Apply: mỗi job đã lưu tính 20%, tối đa 100%
+      const applyScore = Math.min(100, user.saved_jobs.length * 20);
+
+      const stages: JourneyStageDto[] = [
+        {
+          id: 'explore',
+          label: 'Khám phá',
+          desc: 'Xác định ngành & định hướng',
+          progress: Math.min(100, exploreScore),
+          done: exploreScore >= 100,
+          href: '/onboarding/welcome',
+        },
+        {
+          id: 'analyze',
+          label: 'Phân tích',
+          desc: 'Đánh giá skill & CV',
+          progress: Math.min(100, analyzeScore),
+          done: analyzeScore >= 100,
+          href: '/skill-gap',
+        },
+        {
+          id: 'plan',
+          label: 'Lộ trình',
+          desc: 'Xây kế hoạch học tập',
+          progress: Math.min(100, planScore),
+          done: planScore >= 100,
+          href: '/roadmap',
+        },
+        {
+          id: 'apply',
+          label: 'Apply jobs',
+          desc: 'Lưu công việc quan tâm',
+          progress: Math.min(100, applyScore),
+          done: applyScore >= 100,
+          href: '/jobs',
+        },
+      ];
+
+      const overall = Math.round(
+        stages.reduce((s, st) => s + st.progress, 0) / stages.length,
+      );
+
+      return { stages, overall };
+    } catch (error: unknown) {
+      this.handleError(error, 'Get Journey Progress');
+      throw new BadRequestException('Could not fetch journey progress');
     }
   }
 

@@ -110,7 +110,9 @@ export class ProfileController {
     @Req() req: AuthenticatedRequest,
     @Body() dto: ChangePasswordDto,
   ) {
-    return await this.profileService.changePassword(req.user.sub, dto);
+    return {
+      data: await this.profileService.changePassword(req.user.sub, dto),
+    };
   }
 
   @Post('avatar')

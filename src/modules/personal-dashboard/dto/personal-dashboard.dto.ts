@@ -118,6 +118,43 @@ export class RecentActivityDto {
   recorded_at: Date | null;
 }
 
+export class JourneyStageDto {
+  @ApiProperty({ example: 'explore', description: 'ID của bước hành trình' })
+  id: string;
+
+  @ApiProperty({ example: 'Khám phá', description: 'Tên bước' })
+  label: string;
+
+  @ApiProperty({
+    example: 'Xác định ngành & định hướng',
+    description: 'Mô tả bước',
+  })
+  desc: string;
+
+  @ApiProperty({ example: 66, description: 'Tiến độ 0–100' })
+  progress: number;
+
+  @ApiProperty({ example: false, description: 'Đã hoàn thành chưa' })
+  done: boolean;
+
+  @ApiProperty({
+    example: '/onboarding/welcome',
+    description: 'Đường dẫn tới tính năng',
+  })
+  href: string;
+}
+
+export class JourneyProgressDto {
+  @ApiProperty({
+    type: [JourneyStageDto],
+    description: 'Danh sách 4 bước hành trình',
+  })
+  stages: JourneyStageDto[];
+
+  @ApiProperty({ example: 58, description: 'Tổng % hoàn thành hành trình' })
+  overall: number;
+}
+
 export class DashboardProgressDto {
   @ApiProperty({
     example: 100,

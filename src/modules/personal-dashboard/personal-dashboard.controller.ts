@@ -13,6 +13,7 @@ import {
   RecommendedJobDto,
   CategoryGapDto,
   DashboardProgressDto,
+  JourneyProgressDto,
 } from './dto/personal-dashboard.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 
@@ -67,6 +68,16 @@ export class PersonalDashboardController {
   async getProgress(@Req() req: AuthenticatedRequest) {
     const userId = req.user.sub;
     const data = await this.dashboardService.getProgressData(userId);
+    return { data };
+  }
+
+  @Get('journey')
+  @ApiOperation({
+    summary: 'Lấy tiến độ hành trình sự nghiệp 4 bước từ dữ liệu thực',
+  })
+  @ApiResponse({ status: 200, type: JourneyProgressDto })
+  async getJourney(@Req() req: AuthenticatedRequest) {
+    const data = await this.dashboardService.getJourneyProgress(req.user.sub);
     return { data };
   }
 }
