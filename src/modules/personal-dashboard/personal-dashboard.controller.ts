@@ -73,7 +73,7 @@ export class PersonalDashboardController {
 
   @Get('journey')
   @ApiOperation({
-    summary: 'Lấy tiến độ hành trình sự nghiệp 4 bước từ dữ liệu thực',
+    summary: 'Lấy trạng thái hành trình 4 bước từ dữ liệu thực',
   })
   @ApiResponse({ status: 200, type: JourneyProgressDto })
   async getJourney(@Req() req: AuthenticatedRequest) {

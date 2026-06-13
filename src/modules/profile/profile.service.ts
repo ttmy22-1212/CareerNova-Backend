@@ -13,6 +13,56 @@ import { ChangePasswordDto } from './dto/change-profile.dto';
 import { UpdateOnboardingProgressDto } from './dto/update-onboarding-progress.dto';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import * as streamifier from 'streamifier';
+import PDFDocument from 'pdfkit';
+import * as fs from 'fs';
+
+type PdfFonts = {
+  regular: string;
+  bold: string;
+};
+
+type MatchSkillSummary = {
+  skill_name?: string;
+  weight?: number;
+  similarity?: number;
+  gap?: number;
+  matched_via?: string;
+  contribution?: number;
+};
+
+type MatchGapReport = {
+  missing_skills?: MatchSkillSummary[];
+  partially_matched_skills?: MatchSkillSummary[];
+};
+
+const majorLabels: Record<string, string> = {
+  CS: 'Khoa học Máy tính',
+  SE: 'Kỹ thuật Phần mềm',
+  IS: 'Hệ thống Thông tin',
+  IT: 'Công nghệ Thông tin',
+  AI: 'Trí tuệ Nhân tạo',
+  DA: 'Phân tích Dữ liệu',
+  Other: 'Ngành khác',
+};
+
+const interestLabels: Record<string, string> = {
+  frontend: 'Frontend',
+  backend: 'Backend',
+  fullstack: 'Fullstack',
+  mobile: 'Mobile',
+  data: 'Data',
+  ai_ml: 'AI / ML',
+  devops: 'DevOps',
+  cybersecurity: 'Security',
+  qa: 'QA / Test',
+};
+
+const goalLabels: Record<string, string> = {
+  internship: 'Tìm thực tập',
+  fulltime: 'Tìm việc fulltime',
+  switch: 'Chuyển hướng',
+  explore: 'Đang khám phá',
+};
 
 @Injectable()
 export class ProfileService {
@@ -313,6 +363,59 @@ export class ProfileService {
     }
   }
 
+  async resetOnboarding(userId: string) {
+    this.logger.warn(`Resetting onboarding data for user ID: ${userId}`);
+
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const deletedVirtualCvs = await tx.userCv.deleteMany({
+          where: {
+            user_id: userId,
+            file_url: 'internal://onboarding_virtual_cv',
+          },
+        });
+
+        const updatedUser = await tx.user.update({
+          where: { user_id: userId },
+          data: {
+            major: null,
+            school: null,
+            current_year: null,
+            orientation: null,
+            objective: null,
+            target_salary: null,
+            prefer_remote: false,
+            current_step: 1,
+            onboarding_completed: false,
+            updated_at: new Date(),
+          },
+          select: {
+            user_id: true,
+            current_step: true,
+            onboarding_completed: true,
+          },
+        });
+
+        return { updatedUser, deletedVirtualCvs };
+      });
+
+      return {
+        message: 'ONBOARDING_RESET_SUCCESSFULLY',
+        current_step: result.updatedUser.current_step,
+        onboarding_completed: result.updatedUser.onboarding_completed,
+        deleted_virtual_cvs: result.deletedVirtualCvs.count,
+      };
+    } catch (caughtError: unknown) {
+      const error =
+        caughtError instanceof Error ? caughtError : new Error('UNKNOWN_ERROR');
+      this.logger.error(
+        `Failed to reset onboarding for user ID: ${userId}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
   async updateProfile(userId: string, dto: UpdateProfileDto) {
     this.logger.log(`Updating profile for user ID: ${userId}`);
 
@@ -327,6 +430,15 @@ export class ProfileService {
           user_id: true,
           full_name: true,
           avatar_url: true,
+          major: true,
+          school: true,
+          current_year: true,
+          orientation: true,
+          objective: true,
+          target_salary: true,
+          prefer_remote: true,
+          current_step: true,
+          onboarding_completed: true,
           allow_default_cv_matching: true,
           updated_at: true,
         },
@@ -712,6 +824,89 @@ export class ProfileService {
     }
   }
 
+  async exportProfilePdf(userId: string): Promise<Buffer> {
+    this.logger.log(`Exporting profile PDF for user ID: ${userId}`);
+
+    const user = await this.prisma.user.findUnique({
+      where: { user_id: userId },
+      select: {
+        user_id: true,
+        full_name: true,
+        email: true,
+        role: true,
+        major: true,
+        school: true,
+        current_year: true,
+        orientation: true,
+        objective: true,
+        target_salary: true,
+        prefer_remote: true,
+        onboarding_completed: true,
+        allow_default_cv_matching: true,
+        created_at: true,
+        default_cv_id: true,
+        default_match_id: true,
+        auth_providers: {
+          select: { provider: true, last_login_at: true },
+        },
+        default_cv: {
+          include: {
+            cv_skills: {
+              include: { skill: true },
+            },
+          },
+        },
+        cvs: {
+          orderBy: { uploaded_at: 'desc' },
+          include: {
+            cv_skills: {
+              include: { skill: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('USER_NOT_FOUND');
+    }
+
+    const matches = await this.prisma.cvJobMatch.findMany({
+      where: { cv: { user_id: userId } },
+      orderBy: { created_at: 'desc' },
+      include: {
+        cv: {
+          select: {
+            cv_id: true,
+            file_name: true,
+            uploaded_at: true,
+          },
+        },
+        job: {
+          select: {
+            job_id: true,
+            title: true,
+            job_posting_url: true,
+            job_category: true,
+            search_group: true,
+            location: true,
+            work_type: true,
+            is_remote: true,
+            company: {
+              select: {
+                name: true,
+                city: true,
+                country: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return this.renderProfilePdf(user, matches);
+  }
+
   /**
    * Helper kết nối luồng streamifier đẩy dữ liệu buffer của ảnh lên Cloudinary
    */
@@ -748,5 +943,603 @@ export class ProfileService {
 
       fileStream.pipe(uploadStream);
     });
+  }
+
+  private renderProfilePdf(user: any, matches: any[]): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      const doc = new PDFDocument({
+        size: 'A4',
+        margin: 44,
+        bufferPages: true,
+        info: {
+          Title: 'Hồ sơ Career Nova',
+          Author: 'Career Nova',
+          Subject: 'Hồ sơ người dùng và lịch sử matching',
+        },
+      });
+      const chunks: Buffer[] = [];
+      const fonts = this.registerPdfFonts(doc);
+
+      doc.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
+      doc.on('end', () => resolve(Buffer.concat(chunks)));
+      doc.on('error', reject);
+
+      this.drawPdfHeader(doc, fonts, user);
+      this.drawProfileOverview(doc, fonts, user);
+      this.drawCvSummary(doc, fonts, user);
+      this.drawMatchingHistory(doc, fonts, user, matches);
+      this.drawPdfFooters(doc, fonts);
+
+      doc.end();
+    });
+  }
+
+  private registerPdfFonts(doc: PDFKit.PDFDocument): PdfFonts {
+    const regularPath = this.findExistingFile([
+      // Linux (production)
+      '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+      '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',
+      '/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf',
+      '/usr/share/fonts/truetype/ubuntu/Ubuntu[wdth,wght].ttf',
+      // Windows (development)
+      'C:\\Windows\\Fonts\\segoeui.ttf',
+      'C:\\Windows\\Fonts\\arial.ttf',
+      'C:\\Windows\\Fonts\\calibri.ttf',
+    ]);
+    const boldPath = this.findExistingFile([
+      // Linux (production)
+      '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+      '/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf',
+      '/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf',
+      '/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf',
+      // Windows (development)
+      'C:\\Windows\\Fonts\\segoeuib.ttf',
+      'C:\\Windows\\Fonts\\arialbd.ttf',
+      'C:\\Windows\\Fonts\\calibrib.ttf',
+    ]);
+
+    if (regularPath) {
+      doc.registerFont('NovaRegular', regularPath);
+    }
+    if (boldPath) {
+      doc.registerFont('NovaBold', boldPath);
+    }
+
+    return {
+      regular: regularPath ? 'NovaRegular' : 'Helvetica',
+      bold: boldPath ? 'NovaBold' : 'Helvetica-Bold',
+    };
+  }
+
+  private findExistingFile(paths: string[]): string | null {
+    return paths.find((filePath) => fs.existsSync(filePath)) || null;
+  }
+
+  private drawPdfHeader(doc: PDFKit.PDFDocument, fonts: PdfFonts, user: any) {
+    doc.rect(0, 0, doc.page.width, 118).fill('#eff6ff');
+    doc.rect(0, 0, doc.page.width, 10).fill('#2563eb');
+
+    doc
+      .font(fonts.bold)
+      .fontSize(24)
+      .fillColor('#0f172a')
+      .text('Hồ sơ Career Nova', 44, 34, { width: 360 });
+
+    doc
+      .font(fonts.regular)
+      .fontSize(10)
+      .fillColor('#475569')
+      .text(
+        `Ứng viên: ${this.valueOrEmpty(user.full_name)} | ${this.valueOrEmpty(user.email)}`,
+        44,
+        70,
+        { width: 500 },
+      )
+      .text(`Xuất lúc: ${this.formatDateTime(new Date())}`, 44, 88);
+
+    doc.y = 146;
+  }
+
+  private drawProfileOverview(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    user: any,
+  ) {
+    const { interests, suggestedPaths } = this.parseOrientation(
+      user.orientation,
+    );
+
+    this.drawPdfSectionTitle(doc, fonts, 'Thông tin hồ sơ');
+    this.drawPdfRow(doc, fonts, 'Họ tên', user.full_name);
+    this.drawPdfRow(doc, fonts, 'Email', user.email);
+    this.drawPdfRow(doc, fonts, 'Vai trò', user.role);
+    this.drawPdfRow(doc, fonts, 'Trường', user.school);
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Ngành học',
+      user.major ? majorLabels[user.major] || user.major : null,
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Năm học',
+      user.current_year ? `Năm ${user.current_year}` : null,
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Định hướng quan tâm',
+      this.formatList(interests.map((item) => interestLabels[item] || item)),
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Lộ trình gợi ý',
+      this.formatList(
+        suggestedPaths.map((item) => interestLabels[item] || item),
+      ),
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Mục tiêu',
+      user.objective ? goalLabels[user.objective] || user.objective : null,
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Lương mong muốn',
+      user.target_salary
+        ? `${Number(user.target_salary).toLocaleString('vi-VN')} USD`
+        : null,
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Ưu tiên remote',
+      user.prefer_remote ? 'Có' : 'Không',
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Trạng thái onboarding',
+      user.onboarding_completed ? 'Đã hoàn tất' : 'Chưa hoàn tất',
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Cho phép matching CV mặc định',
+      user.allow_default_cv_matching ? 'Đang bật' : 'Đang tắt',
+    );
+  }
+
+  private drawCvSummary(doc: PDFKit.PDFDocument, fonts: PdfFonts, user: any) {
+    this.drawPdfSectionTitle(doc, fonts, 'CV và kỹ năng');
+
+    if (user.default_cv) {
+      this.drawPdfRow(doc, fonts, 'CV mặc định', user.default_cv.file_name);
+      this.drawPdfRow(
+        doc,
+        fonts,
+        'Kỹ năng trong CV mặc định',
+        this.formatList(
+          (user.default_cv.cv_skills || []).map(
+            (item: any) => item.skill?.skill_name,
+          ),
+        ),
+      );
+    } else {
+      this.drawPdfParagraph(
+        doc,
+        fonts,
+        'Chưa có CV mặc định. Người dùng cần chọn CV mặc định để hệ thống phân tích skill gap và đề xuất tốt hơn.',
+      );
+    }
+
+    const cvNames = (user.cvs || []).map((cv: any) => {
+      const suffix =
+        cv.cv_id === user.default_cv_id
+          ? ' (mặc định)'
+          : cv.uploaded_at
+            ? ` (${this.formatDate(cv.uploaded_at)})`
+            : '';
+      return `${cv.file_name || 'CV chưa đặt tên'}${suffix}`;
+    });
+    this.drawPdfRow(doc, fonts, 'Tất cả CV', this.formatList(cvNames));
+  }
+
+  private drawMatchingHistory(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    user: any,
+    matches: any[],
+  ) {
+    this.drawPdfSectionTitle(doc, fonts, 'Chi tiết lịch sử matching');
+    this.drawPdfParagraph(
+      doc,
+      fonts,
+      `Tổng số lượt matching: ${matches.length.toLocaleString('vi-VN')}. ${
+        user.default_match_id
+          ? 'Lượt có nhãn “mặc định” đang được dùng cho dashboard/phân tích chính.'
+          : 'Chưa chọn lượt matching mặc định.'
+      }`,
+    );
+
+    if (matches.length === 0) {
+      this.drawPdfParagraph(
+        doc,
+        fonts,
+        'Chưa có dữ liệu matching. Hãy chạy matching CV với nhóm nghề hoặc URL công việc để tạo báo cáo.',
+      );
+      return;
+    }
+
+    matches.forEach((match, index) => {
+      this.drawMatchDetail(doc, fonts, match, index + 1, user.default_match_id);
+    });
+  }
+
+  private drawMatchDetail(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    match: any,
+    index: number,
+    defaultMatchId?: string | null,
+  ) {
+    const target = this.getMatchTarget(match);
+    const isDefault = defaultMatchId === match.match_id;
+    const gapReport = (match.gap_report || {}) as MatchGapReport;
+    const matchedSkills = Array.isArray(match.radar_data)
+      ? (match.radar_data as MatchSkillSummary[])
+      : [];
+    const partialSkills = Array.isArray(gapReport.partially_matched_skills)
+      ? gapReport.partially_matched_skills
+      : [];
+    const missingSkills = Array.isArray(gapReport.missing_skills)
+      ? gapReport.missing_skills
+      : [];
+
+    this.ensurePdfSpace(doc, 128);
+    doc
+      .roundedRect(44, doc.y, doc.page.width - 88, 34, 8)
+      .fill(isDefault ? '#dbeafe' : '#f8fafc');
+    doc
+      .font(fonts.bold)
+      .fontSize(11)
+      .fillColor(isDefault ? '#1d4ed8' : '#0f172a')
+      .text(
+        `#${index} ${target}${isDefault ? ' — mặc định' : ''}`,
+        58,
+        doc.y + 10,
+        { width: doc.page.width - 116 },
+      );
+    doc.y += 48;
+
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Kiểu matching',
+      match.match_type === 'cv_job'
+        ? 'Theo URL hoặc công việc cụ thể'
+        : 'Theo nhóm nghề',
+    );
+    this.drawPdfRow(doc, fonts, 'CV sử dụng', match.cv?.file_name);
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Điểm phù hợp',
+      this.formatMatchScore(match.match_score),
+    );
+    this.drawPdfRow(
+      doc,
+      fonts,
+      'Thời điểm chạy',
+      this.formatDateTime(match.created_at),
+    );
+    this.drawPdfRow(doc, fonts, 'Nhóm nghề', match.search_group);
+    this.drawPdfRow(doc, fonts, 'Công ty', match.job?.company?.name);
+    this.drawPdfRow(doc, fonts, 'Địa điểm', match.job?.location);
+    this.drawPdfRow(doc, fonts, 'Hình thức', this.formatWorkType(match));
+    this.drawPdfRow(doc, fonts, 'Model', match.model_version);
+    this.drawPdfRow(doc, fonts, 'URL job', match.job?.job_posting_url);
+
+    this.drawPdfBulletList(
+      doc,
+      fonts,
+      'Kỹ năng đã khớp tốt',
+      this.formatMatchedSkills(matchedSkills, 8),
+    );
+    this.drawPdfBulletList(
+      doc,
+      fonts,
+      'Kỹ năng khớp một phần',
+      this.formatGapSkills(partialSkills, 8),
+    );
+    this.drawPdfBulletList(
+      doc,
+      fonts,
+      'Kỹ năng còn thiếu',
+      this.formatGapSkills(missingSkills, 8),
+    );
+
+    doc.moveDown(0.5);
+  }
+
+  private drawPdfSectionTitle(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    title: string,
+  ) {
+    this.ensurePdfSpace(doc, 58);
+    doc
+      .font(fonts.bold)
+      .fontSize(14)
+      .fillColor('#1d4ed8')
+      .text(title, 44, doc.y);
+    doc
+      .moveTo(44, doc.y + 5)
+      .lineTo(doc.page.width - 44, doc.y + 5)
+      .strokeColor('#bfdbfe')
+      .lineWidth(1)
+      .stroke();
+    doc.moveDown(1.1);
+  }
+
+  private drawPdfRow(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    label: string,
+    rawValue: unknown,
+  ) {
+    const value = this.valueOrEmpty(rawValue);
+    const labelX = 44;
+    const valueX = 184;
+    const valueWidth = doc.page.width - valueX - 44;
+    const estimatedLines = Math.max(1, Math.ceil(value.length / 72));
+
+    this.ensurePdfSpace(doc, Math.max(32, estimatedLines * 16 + 12));
+    const startY = doc.y;
+
+    doc
+      .font(fonts.bold)
+      .fontSize(9)
+      .fillColor('#64748b')
+      .text(label, labelX, doc.y, { width: 120 });
+
+    doc
+      .font(fonts.regular)
+      .fontSize(10)
+      .fillColor('#0f172a')
+      .text(value, valueX, startY, {
+        width: valueWidth,
+        lineGap: 2,
+      });
+
+    doc.y = Math.max(doc.y, startY + 17);
+    doc
+      .moveTo(44, doc.y + 5)
+      .lineTo(doc.page.width - 44, doc.y + 5)
+      .strokeColor('#e2e8f0')
+      .lineWidth(0.5)
+      .stroke();
+    doc.moveDown(0.65);
+  }
+
+  private drawPdfParagraph(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    text: string,
+  ) {
+    this.ensurePdfSpace(doc, 42);
+    doc
+      .font(fonts.regular)
+      .fontSize(10)
+      .fillColor('#334155')
+      .text(text, 44, doc.y, {
+        width: doc.page.width - 88,
+        lineGap: 3,
+      });
+    doc.moveDown(0.9);
+  }
+
+  private drawPdfBulletList(
+    doc: PDFKit.PDFDocument,
+    fonts: PdfFonts,
+    title: string,
+    items: string[],
+  ) {
+    this.ensurePdfSpace(doc, 54);
+    doc
+      .font(fonts.bold)
+      .fontSize(10)
+      .fillColor('#0f172a')
+      .text(title, 44, doc.y);
+    doc.moveDown(0.25);
+
+    const list = items.length > 0 ? items : ['Chưa có dữ liệu.'];
+    list.forEach((item) => {
+      this.ensurePdfSpace(doc, 28);
+      doc
+        .font(fonts.regular)
+        .fontSize(9.5)
+        .fillColor('#334155')
+        .text(`• ${item}`, 58, doc.y, {
+          width: doc.page.width - 102,
+          lineGap: 2,
+        });
+      doc.moveDown(0.25);
+    });
+    doc.moveDown(0.45);
+  }
+
+  private drawPdfFooters(doc: PDFKit.PDFDocument, fonts: PdfFonts) {
+    const range = doc.bufferedPageRange();
+    for (
+      let pageIndex = range.start;
+      pageIndex < range.start + range.count;
+      pageIndex += 1
+    ) {
+      doc.switchToPage(pageIndex);
+
+      // Reset doc.y to a safe position above maxY before each text call so
+      // PDFKit never triggers an implicit addPage() when drawing the footer.
+      const safeY = doc.page.height - doc.page.margins.bottom - 20;
+      const footerY = doc.page.height - 34;
+
+      doc.font(fonts.regular).fontSize(8).fillColor('#64748b');
+
+      doc.y = safeY;
+      doc.text('Career Nova', 44, footerY, { width: 220, lineBreak: false });
+
+      doc.y = safeY;
+      doc.text(`Trang ${pageIndex + 1}/${range.count}`, 44, footerY, {
+        width: doc.page.width - 88,
+        align: 'right',
+        lineBreak: false,
+      });
+    }
+  }
+
+  private ensurePdfSpace(doc: PDFKit.PDFDocument, neededHeight: number) {
+    const bottom = doc.page.height - doc.page.margins.bottom - 36;
+    if (doc.y + neededHeight > bottom) {
+      doc.addPage();
+      doc.rect(0, 0, doc.page.width, 8).fill('#2563eb');
+      doc.y = 42;
+    }
+  }
+
+  private parseOrientation(orientation?: string | null): {
+    interests: string[];
+    suggestedPaths: string[];
+  } {
+    const [selectedRaw = '', suggestedRaw = ''] = (orientation || '').split(
+      '|',
+    );
+    return {
+      interests: selectedRaw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+      suggestedPaths: suggestedRaw
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    };
+  }
+
+  private getMatchTarget(match: any): string {
+    if (match.match_type === 'cv_job') {
+      return (
+        match.job?.title ||
+        match.job?.job_posting_url ||
+        match.search_group ||
+        'Công việc cụ thể'
+      );
+    }
+    return match.search_group || match.job?.job_category || 'Nhóm nghề';
+  }
+
+  private formatWorkType(match: any): string {
+    const values = [
+      match.job?.work_type,
+      match.job?.is_remote ? 'Remote' : null,
+    ].filter(Boolean);
+    return this.formatList(values);
+  }
+
+  private formatMatchedSkills(
+    skills: MatchSkillSummary[],
+    limit: number,
+  ): string[] {
+    return [...skills]
+      .sort((a, b) => Number(b.contribution || 0) - Number(a.contribution || 0))
+      .slice(0, limit)
+      .map((skill) => {
+        const parts = [
+          this.valueOrEmpty(skill.skill_name),
+          skill.similarity != null
+            ? `độ khớp ${this.formatPercentValue(skill.similarity)}`
+            : null,
+          skill.contribution != null
+            ? `đóng góp ${this.formatPercentValue(skill.contribution)}`
+            : null,
+        ].filter(Boolean);
+        return parts.join(' | ');
+      });
+  }
+
+  private formatGapSkills(
+    skills: MatchSkillSummary[],
+    limit: number,
+  ): string[] {
+    return [...skills]
+      .sort((a, b) => {
+        const gapDiff = Number(b.gap || 0) - Number(a.gap || 0);
+        if (gapDiff !== 0) return gapDiff;
+        return Number(b.weight || 0) - Number(a.weight || 0);
+      })
+      .slice(0, limit)
+      .map((skill) => {
+        const parts = [
+          this.valueOrEmpty(skill.skill_name),
+          skill.gap != null
+            ? `gap ${this.formatPercentValue(skill.gap)}`
+            : null,
+          skill.similarity != null
+            ? `độ khớp ${this.formatPercentValue(skill.similarity)}`
+            : null,
+          skill.weight != null
+            ? `trọng số ${this.formatPercentValue(skill.weight)}`
+            : null,
+          skill.matched_via ? `khớp qua ${skill.matched_via}` : null,
+        ].filter(Boolean);
+        return parts.join(' | ');
+      });
+  }
+
+  private formatMatchScore(score: unknown): string {
+    if (score == null) return 'Chưa có dữ liệu';
+    const numericScore = Number(score);
+    if (!Number.isFinite(numericScore)) return 'Chưa có dữ liệu';
+    const percent = numericScore <= 1 ? numericScore * 100 : numericScore;
+    return `${Math.round(percent)}%`;
+  }
+
+  private formatPercentValue(value: unknown): string {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return 'N/A';
+    const percent =
+      Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue;
+    return `${Math.round(percent)}%`;
+  }
+
+  private formatList(values: unknown[]): string {
+    const cleaned = values
+      .map((value) => (value == null ? '' : String(value).trim()))
+      .filter(Boolean);
+    return cleaned.length > 0 ? cleaned.join(', ') : 'Chưa cập nhật';
+  }
+
+  private valueOrEmpty(value: unknown): string {
+    if (value == null) return 'Chưa cập nhật';
+    const normalized = String(value).trim();
+    return normalized || 'Chưa cập nhật';
+  }
+
+  private formatDate(value: unknown): string {
+    if (!value) return 'Chưa cập nhật';
+    const date = new Date(value as string | number | Date);
+    if (Number.isNaN(date.getTime())) return 'Chưa cập nhật';
+    return date.toLocaleDateString('vi-VN');
+  }
+
+  private formatDateTime(value: unknown): string {
+    if (!value) return 'Chưa cập nhật';
+    const date = new Date(value as string | number | Date);
+    if (Number.isNaN(date.getTime())) return 'Chưa cập nhật';
+    return date.toLocaleString('vi-VN');
   }
 }

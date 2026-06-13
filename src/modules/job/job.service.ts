@@ -31,6 +31,10 @@ export class JobService {
 
     const skip = (Math.max(1, page) - 1) * limit;
 
+    const matchScoreFilter: Prisma.CvJobMatchWhereInput | null = cv_id
+      ? this.buildMatchScoreFilter(cv_id, min_match)
+      : null;
+
     const andConditions: Prisma.JobWhereInput[] = [
       q
         ? {
@@ -46,13 +50,10 @@ export class JobService {
       experience_level ? { formatted_experience_level: experience_level } : {},
     ];
 
-    if (sortBy === 'match_score' && cv_id) {
+    if (matchScoreFilter && (sortBy === 'match_score' || min_match !== undefined)) {
       andConditions.push({
         cv_matches: {
-          some: {
-            cv_id: cv_id,
-            match_score: { not: null },
-          },
+          some: matchScoreFilter,
         },
       });
     }
@@ -60,15 +61,6 @@ export class JobService {
     const where: Prisma.JobWhereInput = {
       AND: andConditions,
     };
-
-    if (sortBy !== 'match_score' && cv_id && min_match !== undefined) {
-      where.cv_matches = {
-        some: {
-          cv_id,
-          match_score: { gte: min_match },
-        },
-      };
-    }
 
     // Aggregate for Salary
     let orderBy: any;
@@ -149,7 +141,9 @@ export class JobService {
           skill_name: js.skill.skill_name,
           is_inferred: js.is_inferred || false,
         })),
-        match_score: matchRecord ? Number(matchRecord.match_score) : null,
+        match_score: matchRecord
+          ? this.normalizeMatchScore(matchRecord.match_score)
+          : null,
         is_saved: is_saved,
       };
     });
@@ -338,5 +332,47 @@ export class JobService {
       this.logger.error(`Failed to fetch skill categories: ${message}`);
       return [];
     }
+  }
+
+  private buildMatchScoreFilter(
+    cvId: string,
+    minMatch?: number,
+  ): Prisma.CvJobMatchWhereInput {
+    if (minMatch === undefined) {
+      return {
+        cv_id: cvId,
+        match_score: { not: null },
+      };
+    }
+
+    const threshold = Number(minMatch);
+    const scoreConditions: Prisma.CvJobMatchWhereInput[] = [
+      { match_score: { gte: threshold } },
+    ];
+
+    if (threshold > 1) {
+      scoreConditions.push({
+        AND: [
+          { match_score: { gte: threshold / 100 } },
+          { match_score: { lte: 1 } },
+        ],
+      });
+    }
+
+    return {
+      cv_id: cvId,
+      OR: scoreConditions,
+    };
+  }
+
+  private normalizeMatchScore(score: unknown): number {
+    const rawScore = Number(score || 0);
+
+    if (!Number.isFinite(rawScore)) {
+      return 0;
+    }
+
+    const normalizedScore = rawScore <= 1 ? rawScore * 100 : rawScore;
+    return Math.max(0, Math.min(100, Math.round(normalizedScore)));
   }
 }

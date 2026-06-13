@@ -77,9 +77,12 @@ export class MatchingController {
     description: 'Danh sách lịch sử đối sánh thành công',
     type: [CvJobMatchResultDto],
   })
-  async getAllMatches(@Req() req: AuthenticatedRequest) {
+  async getAllMatches(
+    @Req() req: AuthenticatedRequest,
+    @Query('cv_id') cvId?: string,
+  ) {
     const userId = req.user.sub;
-    const data = await this.matchingService.getAllMatches(userId);
+    const data = await this.matchingService.getAllMatches(userId, cvId);
     return { data };
   }
 
@@ -92,8 +95,14 @@ export class MatchingController {
     description:
       'Trả về chi tiết kết quả đối sánh bao gồm radar_data và gap_report',
   })
-  async getMatchDetail(@Param('match_id') matchId: string) {
-    const data = await this.matchingService.getMatchDetail(matchId);
+  async getMatchDetail(
+    @Param('match_id') matchId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const data = await this.matchingService.getMatchDetail(
+      req.user.sub,
+      matchId,
+    );
     return { data };
   }
 
@@ -103,8 +112,14 @@ export class MatchingController {
       'Lấy tất cả các category trong hệ thống và trạng thái có trong lượt match không',
   })
   @ApiResponse({ status: 200, type: [MatchCategoryResponseDto] })
-  async getMatchCategories(@Param('match_id') matchId: string) {
-    const data = await this.matchingService.getMatchCategories(matchId);
+  async getMatchCategories(
+    @Param('match_id') matchId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const data = await this.matchingService.getMatchCategories(
+      req.user.sub,
+      matchId,
+    );
     return { data };
   }
 
@@ -120,9 +135,11 @@ export class MatchingController {
   })
   async getRadarByCategory(
     @Param('match_id') matchId: string,
+    @Req() req: AuthenticatedRequest,
     @Query() query: GetRadarCategoryQueryDto,
   ) {
     const data = await this.matchingService.getRadarByCategory(
+      req.user.sub,
       matchId,
       query.category,
     );

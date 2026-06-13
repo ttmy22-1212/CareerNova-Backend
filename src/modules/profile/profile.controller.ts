@@ -15,6 +15,7 @@ import {
   ParseFilePipe,
   MaxFileSizeValidator,
   FileTypeValidator,
+  Res,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -22,6 +23,7 @@ import {
   ApiBearerAuth,
   ApiResponse,
   ApiParam,
+  ApiProduces,
 } from '@nestjs/swagger';
 import { ProfileService } from './profile.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -35,6 +37,7 @@ import {
   SetDefaultMatchingDto,
 } from './dto/update-default.dto';
 import { FileInterceptor } from '@nestjs/platform-express';
+import type { Response } from 'express';
 
 @ApiTags('Profile')
 @ApiBearerAuth('JWT-auth')
@@ -76,6 +79,17 @@ export class ProfileController {
   @UseGuards(JwtAuthGuard)
   async completeOnboarding(@Req() req: AuthenticatedRequest) {
     return this.profileService.completeOnboarding(req.user.sub);
+  }
+
+  @Delete('onboarding')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Xóa dữ liệu onboarding của user hiện tại' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Dữ liệu onboarding đã được reset về trạng thái ban đầu.',
+  })
+  async resetOnboarding(@Req() req: AuthenticatedRequest) {
+    return this.profileService.resetOnboarding(req.user.sub);
   }
 
   @Patch('me')
@@ -149,6 +163,24 @@ export class ProfileController {
   })
   async getActivity(@Req() req: AuthenticatedRequest) {
     return { data: await this.profileService.getActivity(req.user.sub) };
+  }
+
+  @Get('export.pdf')
+  @ApiOperation({
+    summary: 'Xuất hồ sơ cá nhân và lịch sử matching thành PDF',
+  })
+  @ApiProduces('application/pdf')
+  async exportProfilePdf(
+    @Req() req: AuthenticatedRequest,
+    @Res() res: Response,
+  ) {
+    const pdf = await this.profileService.exportProfilePdf(req.user.sub);
+    const fileName = `ho-so-careernova-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', pdf.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(pdf);
   }
 
   @Delete('me')

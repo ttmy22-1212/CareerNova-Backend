@@ -1,6 +1,8 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
+  CareerPathDto,
+  CareerPathSkillGapDto,
   PrioritySkillDto,
   RecommendedJobDto,
   SavedReportItemDto,
@@ -147,7 +149,7 @@ export class RecommendationService {
 
             location: job.location || 'N/A',
 
-            match_rate: `${Math.round(Number(m.match_score || 0))}% match`,
+            match_rate: `${this.normalizeMatchScore(m.match_score)}% match`,
 
             salary_text: salaryText,
           };
@@ -340,6 +342,73 @@ export class RecommendationService {
     }
   }
 
+  async getCareerPaths(userId: string, limit = 3): Promise<CareerPathDto[]> {
+    try {
+      this.logger.log(`Fetching career path recommendations for user: ${userId}`);
+
+      const normalizedLimit = this.normalizeLimit(limit, 3, 6);
+      const matches = await this.prisma.cvJobMatch.findMany({
+        where: {
+          cv: { user_id: userId },
+          search_group: { not: null },
+        },
+        orderBy: [{ match_score: 'desc' }, { created_at: 'desc' }],
+        take: 30,
+      });
+
+      const bestMatchByGroup = new Map<string, (typeof matches)[number]>();
+      for (const match of matches) {
+        const searchGroup = match.search_group?.trim();
+        if (!searchGroup || bestMatchByGroup.has(searchGroup)) continue;
+        bestMatchByGroup.set(searchGroup, match);
+      }
+
+      const selectedMatches = Array.from(bestMatchByGroup.entries()).slice(
+        0,
+        normalizedLimit,
+      );
+
+      const careerPaths = await Promise.all(
+        selectedMatches.map(async ([searchGroup, match]) => {
+          const currentMatch = this.normalizeMatchScore(match.match_score);
+          const skillGaps = await this.getCareerPathSkillGaps(match.gap_report);
+          const marketStats = await this.getCareerPathMarketStats(searchGroup);
+          const learningPath = await this.findRelevantLearningPath(
+            searchGroup,
+            skillGaps,
+          );
+
+          return {
+            id: this.toStableId(searchGroup),
+            title: this.formatCareerPathTitle(searchGroup),
+            search_group: searchGroup,
+            current_match: currentMatch,
+            target_match: this.getTargetMatch(currentMatch),
+            readiness_label: this.getReadinessLabel(currentMatch, skillGaps),
+            time_to_ready: this.getCareerPathTimeToReady(
+              currentMatch,
+              skillGaps,
+            ),
+            skill_gaps: skillGaps,
+            salary_range: marketStats.salaryRange,
+            openings_count: marketStats.openingsCount,
+            learning_path_title: learningPath?.path_title || null,
+            learning_path_id: learningPath?.path_id || null,
+            href:
+              skillGaps.length > 0
+                ? `/roadmap?skill=${encodeURIComponent(skillGaps[0].skill_name)}`
+                : '/skill-gap',
+          };
+        }),
+      );
+
+      return careerPaths;
+    } catch (error: unknown) {
+      this.handleError(error, 'Get Career Paths');
+      throw new BadRequestException('Could not fetch career path recommendations');
+    }
+  }
+
   /**
    * 2. LẤY DANH SÁCH BÁO CÁO ĐÃ LƯU (SAVED REPORTS)
    */
@@ -392,6 +461,187 @@ export class RecommendationService {
     }
   }
 
+  private async getCareerPathSkillGaps(
+    gapReportRaw: unknown,
+    limit = 4,
+  ): Promise<CareerPathSkillGapDto[]> {
+    const gapReport = (gapReportRaw || {}) as GapReportStructure;
+    const missingSkills = (gapReport.missing_skills || []).map((skill) =>
+      this.mapGapSkill(skill, 'Missing' as const),
+    );
+    const partialSkills = (gapReport.partially_matched_skills || []).map(
+      (skill) => this.mapGapSkill(skill, 'Partial' as const),
+    );
+
+    const uniqueSkills = new Map<
+      number,
+      (typeof missingSkills | typeof partialSkills)[number]
+    >();
+
+    for (const skill of [...missingSkills, ...partialSkills]) {
+      if (!skill.skill_id || !skill.skill_name) continue;
+      const current = uniqueSkills.get(skill.skill_id);
+      if (
+        !current ||
+        skill.status === 'Missing' ||
+        skill.weight > current.weight
+      ) {
+        uniqueSkills.set(skill.skill_id, skill);
+      }
+    }
+
+    const targetSkills = Array.from(uniqueSkills.values());
+    if (targetSkills.length === 0) return [];
+
+    const skillIds = targetSkills.map((skill) => skill.skill_id);
+    const [skills, jobCounts] = await Promise.all([
+      this.prisma.skill.findMany({
+        where: { skill_id: { in: skillIds } },
+        select: { skill_id: true, category: true },
+      }),
+      this.prisma.jobSkill.groupBy({
+        by: ['skill_id'],
+        where: {
+          skill_id: { in: skillIds },
+          job: {
+            OR: [{ expiry_time: { gte: new Date() } }, { expiry_time: null }],
+          },
+        },
+        _count: { job_id: true },
+      }),
+    ]);
+
+    const categoryBySkillId = new Map(
+      skills.map((skill) => [skill.skill_id, skill.category]),
+    );
+    const jobCountBySkillId = new Map(
+      jobCounts.map((item) => [item.skill_id, item._count.job_id]),
+    );
+
+    return targetSkills
+      .map((skill) => {
+        const jobCount = jobCountBySkillId.get(skill.skill_id) || 0;
+        const category =
+          skill.category || categoryBySkillId.get(skill.skill_id) || null;
+
+        return {
+          skill_id: skill.skill_id,
+          skill_name: skill.skill_name,
+          category,
+          priority: this.getPriority(skill.status, skill.weight, jobCount),
+          weight: skill.weight,
+          jobCount,
+        };
+      })
+      .sort((a, b) => {
+        const priorityDiff =
+          this.getPriorityRank(b.priority) - this.getPriorityRank(a.priority);
+        if (priorityDiff !== 0) return priorityDiff;
+        if (b.jobCount !== a.jobCount) return b.jobCount - a.jobCount;
+        return b.weight - a.weight;
+      })
+      .slice(0, limit)
+      .map(({ skill_id, skill_name, category, priority }) => ({
+        skill_id,
+        skill_name,
+        category,
+        priority,
+      }));
+  }
+
+  private async getCareerPathMarketStats(searchGroup: string): Promise<{
+    openingsCount: number;
+    salaryRange: string;
+  }> {
+    const groupCondition = {
+      OR: [
+        { search_group: { equals: searchGroup, mode: 'insensitive' as const } },
+        { job_category: { equals: searchGroup, mode: 'insensitive' as const } },
+      ],
+    };
+
+    const activeCondition = {
+      OR: [{ expiry_time: { gte: new Date() } }, { expiry_time: null }],
+    };
+
+    const where = { AND: [groupCondition, activeCondition] };
+
+    const [openingsCount, jobs] = await Promise.all([
+      this.prisma.job.count({ where }),
+      this.prisma.job.findMany({
+        where,
+        select: {
+          salaries: {
+            select: {
+              min_salary: true,
+              max_salary: true,
+              med_salary: true,
+              currency: true,
+            },
+          },
+        },
+        take: 300,
+      }),
+    ]);
+
+    const minValues: number[] = [];
+    const maxValues: number[] = [];
+    let currency = 'VND';
+
+    for (const job of jobs) {
+      for (const salary of job.salaries) {
+        currency = salary.currency || currency;
+        const minSalary = Number(salary.min_salary || salary.med_salary || 0);
+        const maxSalary = Number(salary.max_salary || salary.med_salary || 0);
+        if (Number.isFinite(minSalary) && minSalary > 0) {
+          minValues.push(minSalary);
+        }
+        if (Number.isFinite(maxSalary) && maxSalary > 0) {
+          maxValues.push(maxSalary);
+        }
+      }
+    }
+
+    if (minValues.length === 0 && maxValues.length === 0) {
+      return { openingsCount, salaryRange: 'Thỏa thuận' };
+    }
+
+    const minSalary =
+      minValues.length > 0 ? Math.min(...minValues) : Math.min(...maxValues);
+    const maxSalary =
+      maxValues.length > 0 ? Math.max(...maxValues) : Math.max(...minValues);
+
+    return {
+      openingsCount,
+      salaryRange: `${this.formatCurrencyAmount(minSalary)} - ${this.formatCurrencyAmount(maxSalary)} ${currency}`,
+    };
+  }
+
+  private async findRelevantLearningPath(
+    searchGroup: string,
+    skillGaps: CareerPathSkillGapDto[],
+  ) {
+    const keywords = [
+      ...skillGaps.map((skill) => skill.skill_name),
+      searchGroup,
+    ].filter(Boolean);
+
+    if (keywords.length === 0) return null;
+
+    return this.prisma.learningPath.findFirst({
+      where: {
+        OR: keywords.slice(0, 5).flatMap((keyword) => [
+          { skill_key: { contains: keyword, mode: 'insensitive' as const } },
+          { path_title: { contains: keyword, mode: 'insensitive' as const } },
+        ]),
+      },
+      select: {
+        path_id: true,
+        path_title: true,
+      },
+    });
+  }
+
   private handleError(error: unknown, context: string) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     const stack = error instanceof Error ? error.stack : '';
@@ -420,6 +670,13 @@ export class RecommendationService {
     if (!Number.isFinite(similarity)) return 0;
 
     return similarity > 1 ? similarity / 100 : similarity;
+  }
+
+  private normalizeMatchScore(value: unknown): number {
+    const score = Number(value || 0);
+    if (!Number.isFinite(score)) return 0;
+    const normalizedScore = score <= 1 ? score * 100 : score;
+    return Math.max(0, Math.min(100, Math.round(normalizedScore)));
   }
 
   private normalizeLimit(value: unknown, defaultValue: number, max: number) {
@@ -458,5 +715,62 @@ export class RecommendationService {
     if (weight >= 0.5) return '2-3 tháng';
     if (weight >= 0.25) return '1-2 tháng';
     return '3-4 tuần';
+  }
+
+  private getTargetMatch(currentMatch: number): number {
+    return Math.min(95, Math.max(80, currentMatch + 10));
+  }
+
+  private getReadinessLabel(
+    currentMatch: number,
+    skillGaps: CareerPathSkillGapDto[],
+  ): string {
+    if (currentMatch >= 85 && skillGaps.length <= 1) return 'Sẵn sàng cao';
+    if (currentMatch >= 70) return 'Cần bổ sung trọng tâm';
+    if (currentMatch >= 50) return 'Có nền tảng phù hợp';
+    return 'Cần xây nền tảng';
+  }
+
+  private getCareerPathTimeToReady(
+    currentMatch: number,
+    skillGaps: CareerPathSkillGapDto[],
+  ): string {
+    const criticalCount = skillGaps.filter(
+      (skill) => skill.priority === 'critical',
+    ).length;
+    const highCount = skillGaps.filter((skill) => skill.priority === 'high')
+      .length;
+
+    if (currentMatch >= 85 && criticalCount === 0) return 'Có thể bắt đầu ngay';
+    if (criticalCount >= 2) return '2-3 tháng';
+    if (criticalCount === 1 || highCount >= 2) return '1-2 tháng';
+    if (skillGaps.length > 0) return '3-4 tuần';
+    return 'Có thể bắt đầu ngay';
+  }
+
+  private formatCareerPathTitle(searchGroup: string): string {
+    return searchGroup
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .split(' ')
+      .map((part) =>
+        part.length <= 3
+          ? part.toUpperCase()
+          : part.charAt(0).toUpperCase() + part.slice(1),
+      )
+      .join(' ');
+  }
+
+  private toStableId(value: string): string {
+    return value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  private formatCurrencyAmount(value: number): string {
+    return Math.round(value).toLocaleString('vi-VN');
   }
 }

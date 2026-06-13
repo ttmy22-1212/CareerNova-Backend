@@ -69,22 +69,23 @@ export class PersonalDashboardService {
         return { match_score: 0, suitable_jobs_count: 0 };
       }
 
-      // Đếm toàn bộ job phù hợp >= 70% trong lịch sử matching của user
-      // Đồng nhất với logic getRecommendedJobs (score thang 0–1)
+      // Đếm toàn bộ job phù hợp >= 70% trong lịch sử matching của user.
+      // Hỗ trợ cả dữ liệu cũ thang 0-1 và dữ liệu mới thang 0-100.
       const suitableCount = await this.prisma.cvJobMatch.count({
         where: {
           cv: { user_id: userId },
           job_id: { not: null },
-          match_score: { gte: 0.7 },
+          OR: [
+            { match_score: { gte: 70 } },
+            {
+              AND: [{ match_score: { gte: 0.7 } }, { match_score: { lte: 1 } }],
+            },
+          ],
         },
       });
 
-      const rawScore = Number(defaultMatch.match_score || 0);
-      const matchScore =
-        rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
-
       return {
-        match_score: matchScore,
+        match_score: this.normalizeMatchScore(defaultMatch.match_score),
         suitable_jobs_count: suitableCount,
       };
     } catch (error: unknown) {
@@ -124,7 +125,7 @@ export class PersonalDashboardService {
 
         if (defaultMatch) {
           // Gắn điểm số tổng quan của default match ban đầu
-          matchScore = Math.round(Number(defaultMatch.match_score || 0));
+          matchScore = this.normalizeMatchScore(defaultMatch.match_score);
 
           // Ép kiểu JsonValue về đúng Interface cấu trúc báo cáo của thuật toán
           const gapReport =
@@ -137,7 +138,7 @@ export class PersonalDashboardService {
 
           // ĐỒNG BỘ LOGIC ĐIỂM SỐ VỚI BANNER THEO 2 LUỒNG
           if (defaultMatch.job_id) {
-            matchScore = Math.round(Number(defaultMatch.match_score || 0));
+            matchScore = this.normalizeMatchScore(defaultMatch.match_score);
           } else if (user.default_cv_id && defaultMatch.search_group) {
             const maxMatchJob = await this.prisma.cvJobMatch.findFirst({
               where: {
@@ -154,7 +155,7 @@ export class PersonalDashboardService {
             });
 
             if (maxMatchJob && maxMatchJob.match_score) {
-              matchScore = Math.round(Number(maxMatchJob.match_score));
+              matchScore = this.normalizeMatchScore(maxMatchJob.match_score);
             }
           }
         }
@@ -609,13 +610,11 @@ export class PersonalDashboardService {
         throw new BadRequestException('User not found');
       }
 
-      // Explore: xác định ngành + định hướng + hoàn thành onboarding quiz
-      const exploreScore =
-        (user.major || user.school ? 33 : 0) +
-        (user.orientation ? 33 : 0) +
-        (user.onboarding_completed ? 34 : 0);
+      const hasExplored =
+        !!user.major &&
+        !!user.current_year &&
+        !!user.orientation;
 
-      // Analyze: upload CV + CV đã được phân tích (có ít nhất 1 match)
       const hasCV = user.cvs.length > 0;
       let hasMatch = false;
       if (hasCV) {
@@ -624,55 +623,42 @@ export class PersonalDashboardService {
         });
         hasMatch = matchCount > 0;
       }
-      const analyzeScore = (hasCV ? 50 : 0) + (hasMatch ? 50 : 0);
 
-      // Plan: đã lưu ít nhất 1 khóa học + đặt mục tiêu nghề nghiệp
-      const hasSavedCourse = user.saved_courses.length > 0;
-      const planScore = (hasSavedCourse ? 60 : 0) + (user.objective ? 40 : 0);
-
-      // Apply: mỗi job đã lưu tính 20%, tối đa 100%
-      const applyScore = Math.min(100, user.saved_jobs.length * 20);
+      const hasLearningResource = user.saved_courses.length > 0;
+      const hasSavedOpportunity = user.saved_jobs.length > 0;
 
       const stages: JourneyStageDto[] = [
         {
           id: 'explore',
-          label: 'Khám phá',
-          desc: 'Xác định ngành & định hướng',
-          progress: Math.min(100, exploreScore),
-          done: exploreScore >= 100,
+          label: 'Khám phá hồ sơ',
+          desc: 'Ngành học, năm học và định hướng',
+          done: hasExplored || user.onboarding_completed,
           href: '/onboarding/welcome',
         },
         {
           id: 'analyze',
           label: 'Phân tích',
-          desc: 'Đánh giá skill & CV',
-          progress: Math.min(100, analyzeScore),
-          done: analyzeScore >= 100,
+          desc: 'CV, kỹ năng và khoảng cách cần bổ sung',
+          done: hasCV || hasMatch,
           href: '/skill-gap',
         },
         {
-          id: 'plan',
-          label: 'Lộ trình',
-          desc: 'Xây kế hoạch học tập',
-          progress: Math.min(100, planScore),
-          done: planScore >= 100,
+          id: 'resources',
+          label: 'Tài nguyên học',
+          desc: 'Lưu khóa học hoặc lộ trình tham khảo',
+          done: hasLearningResource,
           href: '/roadmap',
         },
         {
-          id: 'apply',
-          label: 'Apply jobs',
-          desc: 'Lưu công việc quan tâm',
-          progress: Math.min(100, applyScore),
-          done: applyScore >= 100,
+          id: 'saved',
+          label: 'Cơ hội đã lưu',
+          desc: 'Lưu URL việc làm để xem lại',
+          done: hasSavedOpportunity,
           href: '/jobs',
         },
       ];
 
-      const overall = Math.round(
-        stages.reduce((s, st) => s + st.progress, 0) / stages.length,
-      );
-
-      return { stages, overall };
+      return { stages };
     } catch (error: unknown) {
       this.handleError(error, 'Get Journey Progress');
       throw new BadRequestException('Could not fetch journey progress');

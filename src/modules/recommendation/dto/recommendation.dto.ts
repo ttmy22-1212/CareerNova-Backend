@@ -80,3 +80,61 @@ export class PrioritySkillDto {
   @ApiProperty({ example: '1-2 tháng' })
   timeframe: string;
 }
+
+export class CareerPathSkillGapDto {
+  @ApiProperty({ example: 42 })
+  skill_id: number;
+
+  @ApiProperty({ example: 'Docker' })
+  skill_name: string;
+
+  @ApiProperty({ example: 'DevOps & Cloud', nullable: true })
+  category: string | null;
+
+  @ApiProperty({
+    example: 'high',
+    enum: ['critical', 'high', 'medium', 'low'],
+  })
+  priority: 'critical' | 'high' | 'medium' | 'low';
+}
+
+export class CareerPathDto {
+  @ApiProperty({ example: 'backend_developer' })
+  id: string;
+
+  @ApiProperty({ example: 'Backend Developer' })
+  title: string;
+
+  @ApiProperty({ example: 'backend_developer' })
+  search_group: string;
+
+  @ApiProperty({ example: 68 })
+  current_match: number;
+
+  @ApiProperty({ example: 85 })
+  target_match: number;
+
+  @ApiProperty({ example: 'Cần bổ sung trọng tâm' })
+  readiness_label: string;
+
+  @ApiProperty({ example: '1-2 tháng' })
+  time_to_ready: string;
+
+  @ApiProperty({ type: [CareerPathSkillGapDto] })
+  skill_gaps: CareerPathSkillGapDto[];
+
+  @ApiProperty({ example: '18,000,000 - 30,000,000 VND' })
+  salary_range: string;
+
+  @ApiProperty({ example: 128 })
+  openings_count: number;
+
+  @ApiProperty({ example: 'Backend Foundation', nullable: true })
+  learning_path_title: string | null;
+
+  @ApiProperty({ example: '6e368daa-075f-466f-ba1e-4e4fade5b42a', nullable: true })
+  learning_path_id: string | null;
+
+  @ApiProperty({ example: '/skill-gap' })
+  href: string;
+}

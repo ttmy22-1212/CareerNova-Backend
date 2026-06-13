@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class DashboardBannerDto {
   @ApiProperty({
@@ -131,8 +131,11 @@ export class JourneyStageDto {
   })
   desc: string;
 
-  @ApiProperty({ example: 66, description: 'Tiến độ 0–100' })
-  progress: number;
+  @ApiPropertyOptional({
+    example: 66,
+    description: 'Trường legacy. UI hiện tại không hiển thị phần trăm.',
+  })
+  progress?: number;
 
   @ApiProperty({ example: false, description: 'Đã hoàn thành chưa' })
   done: boolean;
@@ -147,12 +150,15 @@ export class JourneyStageDto {
 export class JourneyProgressDto {
   @ApiProperty({
     type: [JourneyStageDto],
-    description: 'Danh sách 4 bước hành trình',
+    description: 'Danh sách trạng thái 4 bước hành trình',
   })
   stages: JourneyStageDto[];
 
-  @ApiProperty({ example: 58, description: 'Tổng % hoàn thành hành trình' })
-  overall: number;
+  @ApiPropertyOptional({
+    example: 58,
+    description: 'Trường legacy. UI hiện tại không hiển thị tổng phần trăm.',
+  })
+  overall?: number;
 }
 
 export class DashboardProgressDto {

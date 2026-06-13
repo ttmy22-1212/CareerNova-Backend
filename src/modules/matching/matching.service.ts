@@ -318,15 +318,25 @@ export class MatchingService {
     }
   }
 
-  async getMatchDetail(matchId: string): Promise<CvJobMatchResultDto> {
+  async getMatchDetail(
+    userId: string,
+    matchId: string,
+  ): Promise<CvJobMatchResultDto> {
     try {
       this.logger.log(`Fetching match details for ID: ${matchId}`);
-      const matchDetail = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: matchId },
+      const matchDetail = await this.prisma.cvJobMatch.findFirst({
+        where: {
+          match_id: matchId,
+          cv: {
+            user_id: userId,
+          },
+        },
       });
 
       if (!matchDetail) {
-        throw new NotFoundException('Match analysis record not found');
+        throw new NotFoundException(
+          'Match analysis record not found or unauthorized',
+        );
       }
 
       const safeData = JSON.parse(
@@ -338,26 +348,31 @@ export class MatchingService {
       return safeData;
     } catch (error: unknown) {
       this.handleError(error, 'Get Match Detail');
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
       throw new BadRequestException('Could not retrieve match details');
     }
   }
 
   async getAllMatches(
     userId: string,
+    cvId?: string,
   ): Promise<Omit<CvJobMatchResultDto, 'radar_data' | 'gap_report'>[]> {
     try {
       this.logger.log(
-        `Fetching all match history for user ID: ${userId} based on default CV`,
+        `Fetching match history for user ID: ${userId}${cvId ? ` and CV ID: ${cvId}` : ''}`,
       );
 
-      const matches = await this.prisma.cvJobMatch.findMany({
-        where: {
-          cv: {
-            default_for_user: {
-              user_id: userId,
-            },
-          },
+      const where: Prisma.CvJobMatchWhereInput = {
+        ...(cvId ? { cv_id: cvId } : {}),
+        cv: {
+          user_id: userId,
         },
+      };
+
+      const matches = await this.prisma.cvJobMatch.findMany({
+        where,
         select: {
           match_id: true,
           cv_id: true,
@@ -383,11 +398,17 @@ export class MatchingService {
   }
 
   async getMatchCategories(
+    userId: string,
     matchId: string,
   ): Promise<MatchCategoryResponseDto[]> {
     try {
-      const match = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: matchId },
+      const match = await this.prisma.cvJobMatch.findFirst({
+        where: {
+          match_id: matchId,
+          cv: {
+            user_id: userId,
+          },
+        },
         select: {
           radar_data: true,
           gap_report: true,
@@ -480,12 +501,18 @@ export class MatchingService {
   }
 
   async getRadarByCategory(
+    userId: string,
     matchId: string,
     categoryName: string,
   ): Promise<RadarCategoryResponseDto> {
     try {
-      const match = await this.prisma.cvJobMatch.findUnique({
-        where: { match_id: matchId },
+      const match = await this.prisma.cvJobMatch.findFirst({
+        where: {
+          match_id: matchId,
+          cv: {
+            user_id: userId,
+          },
+        },
         select: {
           radar_data: true,
           gap_report: true,

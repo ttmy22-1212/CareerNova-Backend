@@ -106,10 +106,7 @@ export class SkillGapService {
         missing_skills: [],
       };
 
-      const rawScore = Number(match.match_score || 0);
-
-      const finalScore =
-        rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
+      const finalScore = this.normalizeMatchScore(match.match_score);
 
       const allGapSkills = [
         ...(gapReport.partially_matched_skills || []),
@@ -332,7 +329,9 @@ export class SkillGapService {
         const signedContribution =
           state.status === 'missing' ? -weight : weight * state.similarity;
         const userRate =
-          state.status === 'missing' ? 0 : Math.round(state.similarity * 100);
+          state.status === 'missing'
+            ? 0
+            : Math.round(this.normalizeSimilarity(state.similarity) * 100);
         const skillGapScore = Number(
           ((signedContribution / weight) * 100).toFixed(1),
         );
@@ -565,7 +564,9 @@ export class SkillGapService {
             skill.category ||
             categoryBySkillId.get(skill.skill_id) ||
             'General';
-          const userRate = Math.round(skill.similarity * 100);
+          const userRate = Math.round(
+            this.normalizeSimilarity(skill.similarity) * 100,
+          );
 
           return {
             id: String(skill.skill_id || skill.skill_name),
@@ -883,6 +884,17 @@ export class SkillGapService {
     const normalizedValue =
       numericValue > 1 ? numericValue / 100 : numericValue;
     return Math.min(Math.max(normalizedValue, 0), 1);
+  }
+
+  private normalizeMatchScore(value: unknown): number {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return 0;
+    }
+
+    const normalizedValue =
+      numericValue <= 1 ? numericValue * 100 : numericValue;
+    return Math.min(Math.max(Math.round(normalizedValue), 0), 100);
   }
 
   private formatSignedPoint(value: number): string {
