@@ -7,6 +7,11 @@ import {
   RecommendedJobDto,
   SavedReportItemDto,
 } from './dto/recommendation.dto';
+import {
+  formatSalaryText,
+  formatUsdAnnualSalaryRange,
+  getNormalizedSalaryRange,
+} from '../../common/utils/salary.util';
 
 interface GapSkillDetail {
   skill_id: number | string;
@@ -128,18 +133,6 @@ export class RecommendationService {
         return validMatches.map((m) => {
           const job = m.job!;
 
-          const salary = job.salaries[0];
-
-          let salaryText = 'Thỏa thuận';
-
-          if (salary && (salary.min_salary || salary.max_salary)) {
-            salaryText = `${Math.round(
-              Number(salary.min_salary || 0),
-            )} - ${Math.round(
-              Number(salary.max_salary || 0),
-            )} ${salary.currency || 'VND'}`;
-          }
-
           return {
             job_id: job.job_id.toString(),
 
@@ -151,7 +144,7 @@ export class RecommendationService {
 
             match_rate: `${this.normalizeMatchScore(m.match_score)}% match`,
 
-            salary_text: salaryText,
+            salary_text: formatSalaryText(job.salaries),
           };
         });
       }
@@ -188,18 +181,6 @@ export class RecommendationService {
       });
 
       return rawJobs.map((job) => {
-        const salary = job.salaries[0];
-
-        let salaryText = 'Thỏa thuận';
-
-        if (salary && (salary.min_salary || salary.max_salary)) {
-          salaryText = `${Math.round(
-            Number(salary.min_salary || 0),
-          )} - ${Math.round(
-            Number(salary.max_salary || 0),
-          )} ${salary.currency || 'VND'}`;
-        }
-
         return {
           job_id: job.job_id.toString(),
 
@@ -211,7 +192,7 @@ export class RecommendationService {
 
           match_rate: 'Xem chi tiết',
 
-          salary_text: salaryText,
+          salary_text: formatSalaryText(job.salaries),
         };
       });
     } catch (error: unknown) {
@@ -344,7 +325,9 @@ export class RecommendationService {
 
   async getCareerPaths(userId: string, limit = 3): Promise<CareerPathDto[]> {
     try {
-      this.logger.log(`Fetching career path recommendations for user: ${userId}`);
+      this.logger.log(
+        `Fetching career path recommendations for user: ${userId}`,
+      );
 
       const normalizedLimit = this.normalizeLimit(limit, 3, 6);
       const matches = await this.prisma.cvJobMatch.findMany({
@@ -405,7 +388,9 @@ export class RecommendationService {
       return careerPaths;
     } catch (error: unknown) {
       this.handleError(error, 'Get Career Paths');
-      throw new BadRequestException('Could not fetch career path recommendations');
+      throw new BadRequestException(
+        'Could not fetch career path recommendations',
+      );
     }
   }
 
@@ -577,6 +562,7 @@ export class RecommendationService {
               max_salary: true,
               med_salary: true,
               currency: true,
+              pay_period: true,
             },
           },
         },
@@ -586,19 +572,14 @@ export class RecommendationService {
 
     const minValues: number[] = [];
     const maxValues: number[] = [];
-    let currency = 'VND';
 
     for (const job of jobs) {
       for (const salary of job.salaries) {
-        currency = salary.currency || currency;
-        const minSalary = Number(salary.min_salary || salary.med_salary || 0);
-        const maxSalary = Number(salary.max_salary || salary.med_salary || 0);
-        if (Number.isFinite(minSalary) && minSalary > 0) {
-          minValues.push(minSalary);
-        }
-        if (Number.isFinite(maxSalary) && maxSalary > 0) {
-          maxValues.push(maxSalary);
-        }
+        const normalizedSalary = getNormalizedSalaryRange(salary);
+        if (!normalizedSalary) continue;
+
+        minValues.push(normalizedSalary.min);
+        maxValues.push(normalizedSalary.max);
       }
     }
 
@@ -613,7 +594,7 @@ export class RecommendationService {
 
     return {
       openingsCount,
-      salaryRange: `${this.formatCurrencyAmount(minSalary)} - ${this.formatCurrencyAmount(maxSalary)} ${currency}`,
+      salaryRange: formatUsdAnnualSalaryRange(minSalary, maxSalary),
     };
   }
 
@@ -630,10 +611,12 @@ export class RecommendationService {
 
     return this.prisma.learningPath.findFirst({
       where: {
-        OR: keywords.slice(0, 5).flatMap((keyword) => [
-          { skill_key: { contains: keyword, mode: 'insensitive' as const } },
-          { path_title: { contains: keyword, mode: 'insensitive' as const } },
-        ]),
+        OR: keywords
+          .slice(0, 5)
+          .flatMap((keyword) => [
+            { skill_key: { contains: keyword, mode: 'insensitive' as const } },
+            { path_title: { contains: keyword, mode: 'insensitive' as const } },
+          ]),
       },
       select: {
         path_id: true,
@@ -738,8 +721,9 @@ export class RecommendationService {
     const criticalCount = skillGaps.filter(
       (skill) => skill.priority === 'critical',
     ).length;
-    const highCount = skillGaps.filter((skill) => skill.priority === 'high')
-      .length;
+    const highCount = skillGaps.filter(
+      (skill) => skill.priority === 'high',
+    ).length;
 
     if (currentMatch >= 85 && criticalCount === 0) return 'Có thể bắt đầu ngay';
     if (criticalCount >= 2) return '2-3 tháng';
@@ -768,9 +752,5 @@ export class RecommendationService {
       .trim()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '');
-  }
-
-  private formatCurrencyAmount(value: number): string {
-    return Math.round(value).toLocaleString('vi-VN');
   }
 }

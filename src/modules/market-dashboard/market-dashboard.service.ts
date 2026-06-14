@@ -13,11 +13,14 @@ import { HotJobItemDto } from './dto/hot-jobs-response.dto';
 import { SalaryRangeItemDto } from './dto/salary-ranges-response.dto';
 import { InDemandSkillItemDto } from './dto/in-demand-skills-response.dto';
 import { RisingSkillItemDto } from './dto/rising-skills-response.dto';
+import {
+  getNormalizedSalaryRange,
+  getSalaryRepresentativeAnnualUsd,
+} from '../../common/utils/salary.util';
 
 @Injectable()
 export class MarketDashboardService {
   private readonly logger = new Logger(MarketDashboardService.name);
-  private readonly VND_TO_USD_RATE = 25000; // Tỷ giá quy đổi giả định phục vụ chuẩn hóa tiền tệ
   private readonly WORK_TYPE_OPTIONS = [
     { label: 'Toàn bộ loại hình', value: '' },
     { label: 'Toàn thời gian', value: 'full_time' },
@@ -130,33 +133,13 @@ export class MarketDashboardService {
       let globalMax = -Infinity;
 
       for (const s of salariesRaw) {
-        const minVal = Number(s.min_salary || 0);
-        const maxVal = Number(s.max_salary || 0);
-        const medVal = Number(s.med_salary || 0);
+        const normalizedSalary = getNormalizedSalaryRange(s);
+        if (!normalizedSalary) continue;
 
-        // Chuẩn hóa chu kỳ sang Năm & Tiền tệ sang USD
-        const normMin = this.normalizeSalaryValue(
-          minVal,
-          s.pay_period,
-          s.currency,
-        );
-        const normMax = this.normalizeSalaryValue(
-          maxVal,
-          s.pay_period,
-          s.currency,
-        );
-        const normMed = this.normalizeSalaryValue(
-          medVal,
-          s.pay_period,
-          s.currency,
-        );
-
-        if (normMed > 0) {
-          normalizedMedians.push(normMed);
-          totalNormalizedMedian += normMed;
-        }
-        if (normMin > 0 && normMin < globalMin) globalMin = normMin;
-        if (normMax > 0 && normMax > globalMax) globalMax = normMax;
+        normalizedMedians.push(normalizedSalary.representative);
+        totalNormalizedMedian += normalizedSalary.representative;
+        if (normalizedSalary.min < globalMin) globalMin = normalizedSalary.min;
+        if (normalizedSalary.max > globalMax) globalMax = normalizedSalary.max;
       }
 
       const avgSalary =
@@ -473,7 +456,13 @@ export class MarketDashboardService {
             select: { name: true },
           },
           salaries: {
-            select: { med_salary: true, currency: true, pay_period: true },
+            select: {
+              min_salary: true,
+              max_salary: true,
+              med_salary: true,
+              currency: true,
+              pay_period: true,
+            },
           },
         },
       });
@@ -481,14 +470,8 @@ export class MarketDashboardService {
       const results: HotJobItemDto[] = jobs
         .map((job) => {
           const salaryValues = job.salaries
-            .map((salary) =>
-              this.normalizeSalaryValue(
-                Number(salary.med_salary || 0),
-                salary.pay_period,
-                salary.currency,
-              ),
-            )
-            .filter((salary) => salary > 0);
+            .map(getSalaryRepresentativeAnnualUsd)
+            .filter((salary): salary is number => salary !== null);
           const saveCount = saveCountByJobId.get(job.job_id.toString()) || 0;
 
           return {
@@ -540,66 +523,82 @@ export class MarketDashboardService {
       );
       const baseWhere = this.buildBaseWhereCondition(filters);
 
-      // Bốc ra Top 6 job_category có nhiều bài đăng nhất
-      const topCategories = await this.prisma.job.groupBy({
-        by: ['job_category'],
-        _count: { job_id: true },
+      const salaryJobWhere: Prisma.JobWhereInput = {
+        ...baseWhere,
+        listed_time: { gte: currentStart, lte: currentEnd },
+        AND: [
+          ...(Array.isArray(baseWhere?.AND)
+            ? baseWhere.AND
+            : baseWhere?.AND
+              ? [baseWhere.AND]
+              : []),
+          { job_category: { not: null } },
+          { job_category: { not: '' } },
+        ],
+      };
+
+      const salaryRecords = await this.prisma.salary.findMany({
         where: {
-          ...baseWhere,
-          listed_time: { gte: currentStart, lte: currentEnd },
-          AND: [{ job_category: { not: null } }, { job_category: { not: '' } }],
+          job: salaryJobWhere,
+          OR: [
+            { min_salary: { not: null } },
+            { max_salary: { not: null } },
+            { med_salary: { not: null } },
+          ],
         },
-        orderBy: { _count: { job_id: 'desc' } },
-        take: 6,
+        select: {
+          min_salary: true,
+          max_salary: true,
+          med_salary: true,
+          currency: true,
+          pay_period: true,
+          job: {
+            select: { job_category: true },
+          },
+        },
       });
 
-      const results = await Promise.all(
-        topCategories.map(async (c) => {
-          const salaries = await this.prisma.salary.findMany({
-            where: {
-              job: {
-                ...baseWhere,
-                listed_time: { gte: currentStart, lte: currentEnd },
-                job_category: c.job_category,
-              },
-            },
-            select: {
-              min_salary: true,
-              max_salary: true,
-              currency: true,
-              pay_period: true,
-            },
-          });
+      const roleSalaryMap = new Map<
+        string,
+        { minSalary: number; maxSalary: number; sampleCount: number }
+      >();
 
-          let minSalary = Infinity;
-          let maxSalary = -Infinity;
+      for (const salary of salaryRecords) {
+        const role = salary.job?.job_category?.trim();
+        const normalizedSalary = getNormalizedSalaryRange(salary);
+        if (!role || !normalizedSalary) continue;
 
-          for (const s of salaries) {
-            const normMin = this.normalizeSalaryValue(
-              Number(s.min_salary || 0),
-              s.pay_period,
-              s.currency,
-            );
-            const normMax = this.normalizeSalaryValue(
-              Number(s.max_salary || 0),
-              s.pay_period,
-              s.currency,
-            );
+        const current = roleSalaryMap.get(role) || {
+          minSalary: Infinity,
+          maxSalary: -Infinity,
+          sampleCount: 0,
+        };
 
-            if (normMin > 0 && normMin < minSalary) minSalary = normMin;
-            if (normMax > 0 && normMax > maxSalary) maxSalary = normMax;
+        current.minSalary = Math.min(current.minSalary, normalizedSalary.min);
+        current.maxSalary = Math.max(current.maxSalary, normalizedSalary.max);
+        current.sampleCount += 1;
+        roleSalaryMap.set(role, current);
+      }
+
+      return Array.from(roleSalaryMap.entries())
+        .map(([role, data]) => ({
+          role,
+          min_salary:
+            data.minSalary === Infinity ? 0 : Math.round(data.minSalary),
+          max_salary:
+            data.maxSalary === -Infinity ? 0 : Math.round(data.maxSalary),
+          currency: 'USD',
+          sample_count: data.sampleCount,
+        }))
+        .sort((a, b) => {
+          if (b.sample_count !== a.sample_count) {
+            return b.sample_count - a.sample_count;
           }
 
-          return {
-            role: c.job_category!,
-            min_salary: minSalary === Infinity ? 0 : Math.round(minSalary),
-            max_salary: maxSalary === -Infinity ? 0 : Math.round(maxSalary),
-            currency: 'USD',
-          };
-        }),
-      );
-
-      return results;
+          return b.max_salary - a.max_salary;
+        })
+        .slice(0, 6)
+        .map(({ sample_count, ...item }) => item);
     } catch (error: unknown) {
       this.handleError(error, 'Salary Ranges');
       throw new BadRequestException('Could not compile salary ranges');
@@ -698,7 +697,13 @@ export class MarketDashboardService {
           job: {
             select: {
               salaries: {
-                select: { med_salary: true, currency: true, pay_period: true },
+                select: {
+                  min_salary: true,
+                  max_salary: true,
+                  med_salary: true,
+                  currency: true,
+                  pay_period: true,
+                },
               },
             },
           },
@@ -753,13 +758,9 @@ export class MarketDashboardService {
         // Tính gộp tiền lương từ các bản ghi Salary của Job này luôn
         const salaries = js.job?.salaries || [];
         for (const s of salaries) {
-          const normMed = this.normalizeSalaryValue(
-            Number(s.med_salary || 0),
-            s.pay_period,
-            s.currency,
-          );
-          if (normMed > 0) {
-            stats.totalSalary += normMed;
+          const normalizedSalary = getSalaryRepresentativeAnnualUsd(s);
+          if (normalizedSalary !== null) {
+            stats.totalSalary += normalizedSalary;
             stats.salaryCount += 1;
           }
         }
@@ -876,30 +877,6 @@ export class MarketDashboardService {
     };
 
     return variants[workType] || [workType];
-  }
-
-  /**
-   * Chuẩn hóa tiền tệ (về USD) và chu kỳ lương (về Hệ Năm)
-   */
-  private normalizeSalaryValue(
-    val: number,
-    payPeriod: string | null,
-    currency: string | null,
-  ): number {
-    if (!val || val <= 0) return 0;
-
-    let annualVal = val;
-    // 1. Chuẩn hóa chu kỳ về Năm
-    if (payPeriod === 'monthly') {
-      annualVal = val * 12;
-    }
-
-    // 2. Chuẩn hóa tiền tệ về USD
-    if (currency === 'VND') {
-      annualVal = annualVal / this.VND_TO_USD_RATE;
-    }
-
-    return annualVal;
   }
 
   /**

@@ -11,6 +11,7 @@ import {
   JourneyProgressDto,
   JourneyStageDto,
 } from './dto/personal-dashboard.dto';
+import { formatSalaryText as formatSalaryTextValue } from '../../common/utils/salary.util';
 
 interface MatchedSkillDetail {
   skill_id: number;
@@ -495,17 +496,12 @@ export class PersonalDashboardService {
     salaries: Array<{
       min_salary: unknown;
       max_salary: unknown;
+      med_salary?: unknown;
       currency: string | null;
+      pay_period?: string | null;
     }>,
   ): string {
-    const salary = salaries[0];
-    if (!salary || (!salary.min_salary && !salary.max_salary)) {
-      return 'Thỏa thuận';
-    }
-
-    return `${Math.round(Number(salary.min_salary || 0))} - ${Math.round(
-      Number(salary.max_salary || 0),
-    )} ${salary.currency || 'VND'}`;
+    return formatSalaryTextValue(salaries);
   }
 
   async getProgressData(userId: string): Promise<DashboardProgressDto> {
@@ -611,9 +607,7 @@ export class PersonalDashboardService {
       }
 
       const hasExplored =
-        !!user.major &&
-        !!user.current_year &&
-        !!user.orientation;
+        !!user.major && !!user.current_year && !!user.orientation;
 
       const hasCV = user.cvs.length > 0;
       let hasMatch = false;

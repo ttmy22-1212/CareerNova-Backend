@@ -20,6 +20,9 @@ class SalaryDto {
 
   @ApiProperty({ example: 'VND' })
   currency: string;
+
+  @ApiProperty({ example: 'monthly', nullable: true })
+  pay_period: string | null;
 }
 
 class JobSkillDto {
@@ -60,6 +63,12 @@ export class JobItemDto {
 
   @ApiProperty({ type: [JobSkillDto] })
   skills: JobSkillDto[];
+
+  @ApiProperty({
+    example: 'https://www.linkedin.com/jobs/view/123',
+    nullable: true,
+  })
+  job_posting_url: string | null;
 
   @ApiProperty({ example: 82.5, nullable: true })
   match_score: number | null;

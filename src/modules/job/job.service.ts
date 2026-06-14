@@ -5,6 +5,10 @@ import { GetJobsQueryDto, SortOrder } from './dto/get-jobs-query.dto';
 import { GetJobsResponseDto, JobItemDto } from './dto/job-response.dto';
 import { GetSkillsQueryDto } from './dto/get-skills-query.dto';
 import { GetSkillsResponseDto } from './dto/skill-response.dto';
+import {
+  getBestSalaryRecord,
+  getSalaryRepresentativeAnnualUsd,
+} from '../../common/utils/salary.util';
 
 @Injectable()
 export class JobService {
@@ -45,12 +49,15 @@ export class JobService {
             ],
           }
         : {},
-      work_type ? { work_type } : {},
+      work_type ? this.buildWorkTypeFilter(work_type) : {},
       location ? { location: { contains: location, mode: 'insensitive' } } : {},
       experience_level ? { formatted_experience_level: experience_level } : {},
     ];
 
-    if (matchScoreFilter && (sortBy === 'match_score' || min_match !== undefined)) {
+    if (
+      matchScoreFilter &&
+      (sortBy === 'match_score' || min_match !== undefined)
+    ) {
       andConditions.push({
         cv_matches: {
           some: matchScoreFilter,
@@ -62,14 +69,11 @@ export class JobService {
       AND: andConditions,
     };
 
-    // Aggregate for Salary
-    let orderBy: any;
-
-    if (sortBy === 'salary_med' || sortBy === 'match_score') {
-      orderBy = undefined;
-    } else {
-      orderBy = { [sortBy]: sortOrder };
-    }
+    const shouldSortBySalary = sortBy === 'salary_med';
+    const shouldSortByMatchScore = sortBy === 'match_score' && !!cv_id;
+    const shouldSortInMemory = shouldSortBySalary || shouldSortByMatchScore;
+    const shouldSkipDbOrder = shouldSortBySalary || sortBy === 'match_score';
+    const orderBy = shouldSkipDbOrder ? undefined : { [sortBy]: sortOrder };
 
     this.logger.log(
       `Fetching jobs: page=${page}, limit=${limit}, sortBy=${sortBy}`,
@@ -79,15 +83,13 @@ export class JobService {
       this.prisma.job.count({ where }),
       this.prisma.job.findMany({
         where,
-        skip,
-        take: limit,
+        ...(shouldSortInMemory ? {} : { skip, take: limit }),
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         orderBy,
         include: {
           company: { select: { company_id: true, name: true } },
           salaries: {
-            orderBy: { med_salary: 'desc' },
-            take: 1,
+            orderBy: { salary_id: 'asc' },
           },
           job_skills: {
             include: {
@@ -110,10 +112,42 @@ export class JobService {
       }),
     ]);
 
+    const sortedJobs = [...jobs];
+
+    if (shouldSortByMatchScore) {
+      sortedJobs.sort((a, b) => {
+        const scoreA = a.cv_matches?.[0]
+          ? this.normalizeMatchScore(a.cv_matches[0].match_score)
+          : null;
+        const scoreB = b.cv_matches?.[0]
+          ? this.normalizeMatchScore(b.cv_matches[0].match_score)
+          : null;
+
+        return this.compareNullableNumbers(scoreA, scoreB, sortOrder);
+      });
+    }
+
+    if (shouldSortBySalary) {
+      sortedJobs.sort((a, b) => {
+        const salaryA = getSalaryRepresentativeAnnualUsd(
+          getBestSalaryRecord(a.salaries),
+        );
+        const salaryB = getSalaryRepresentativeAnnualUsd(
+          getBestSalaryRecord(b.salaries),
+        );
+
+        return this.compareNullableNumbers(salaryA, salaryB, sortOrder);
+      });
+    }
+
+    const pageJobs = shouldSortInMemory
+      ? sortedJobs.slice(skip, skip + limit)
+      : sortedJobs;
+
     // map Data to JobItemDto
-    const formattedData: JobItemDto[] = jobs.map((job) => {
+    const formattedData: JobItemDto[] = pageJobs.map((job) => {
       const matchRecord = job.cv_matches?.[0];
-      const salary = job.salaries[0] || null;
+      const salary = getBestSalaryRecord(job.salaries);
       const is_saved = job.saved_by && job.saved_by.length > 0;
 
       return {
@@ -141,32 +175,13 @@ export class JobService {
           skill_name: js.skill.skill_name,
           is_inferred: js.is_inferred || false,
         })),
+        job_posting_url: job.job_posting_url,
         match_score: matchRecord
           ? this.normalizeMatchScore(matchRecord.match_score)
           : null,
         is_saved: is_saved,
       };
     });
-
-    // Sort by match_score (Application)
-    if (sortBy === 'match_score' && cv_id) {
-      formattedData.sort((a, b) =>
-        sortOrder === SortOrder.DESC
-          ? (b.match_score || 0) - (a.match_score || 0)
-          : (a.match_score || 0) - (b.match_score || 0),
-      );
-    }
-
-    if (sortBy === 'salary_med') {
-      formattedData.sort((a, b) => {
-        const salaryA = a.salary?.med_salary ? Number(a.salary.med_salary) : 0;
-        const salaryB = b.salary?.med_salary ? Number(b.salary.med_salary) : 0;
-
-        return sortOrder === SortOrder.DESC
-          ? salaryB - salaryA
-          : salaryA - salaryB;
-      });
-    }
 
     return {
       data: formattedData,
@@ -227,6 +242,7 @@ export class JobService {
       partial: [],
       missing: [],
     };
+    const selectedSalary = getBestSalaryRecord(job.salaries);
     const is_saved = job.saved_by && job.saved_by.length > 0;
     return {
       data: {
@@ -247,13 +263,13 @@ export class JobService {
               company_industries: undefined,
             }
           : null,
-        salary: job.salaries[0]
+        salary: selectedSalary
           ? {
-              ...job.salaries[0],
+              ...selectedSalary,
               job_id: undefined,
-              min_salary: job.salaries[0].min_salary?.toString(),
-              max_salary: job.salaries[0].max_salary?.toString(),
-              med_salary: job.salaries[0].med_salary?.toString(),
+              min_salary: selectedSalary.min_salary?.toString(),
+              max_salary: selectedSalary.max_salary?.toString(),
+              med_salary: selectedSalary.med_salary?.toString(),
             }
           : null,
         skills: job.job_skills.map((js) => ({
@@ -365,6 +381,60 @@ export class JobService {
     };
   }
 
+  private buildWorkTypeFilter(workType: string): Prisma.JobWhereInput {
+    const normalizedWorkType = this.normalizeWorkType(workType);
+    const workTypeVariants = this.getWorkTypeVariants(normalizedWorkType);
+
+    if (normalizedWorkType === 'remote') {
+      return {
+        OR: [{ work_type: { in: workTypeVariants } }, { is_remote: true }],
+      };
+    }
+
+    return { work_type: { in: workTypeVariants } };
+  }
+
+  private normalizeWorkType(value?: string | null): string {
+    const normalizedValue = (value || '').trim().toLowerCase();
+
+    switch (normalizedValue) {
+      case 'full-time':
+      case 'full time':
+      case 'fulltime':
+      case 'full_time':
+        return 'full_time';
+      case 'part-time':
+      case 'part time':
+      case 'parttime':
+      case 'part_time':
+        return 'part_time';
+      case 'contract':
+        return 'contract';
+      case 'internship':
+      case 'intern':
+        return 'internship';
+      case 'remote':
+        return 'remote';
+      case 'hybrid':
+        return 'hybrid';
+      default:
+        return normalizedValue;
+    }
+  }
+
+  private getWorkTypeVariants(workType: string): string[] {
+    const variants: Record<string, string[]> = {
+      full_time: ['full_time', 'Full-time', 'Full Time', 'Fulltime'],
+      part_time: ['part_time', 'Part-time', 'Part Time', 'Parttime'],
+      contract: ['contract', 'Contract'],
+      internship: ['internship', 'Internship', 'Intern'],
+      remote: ['remote', 'Remote'],
+      hybrid: ['hybrid', 'Hybrid'],
+    };
+
+    return variants[workType] || [workType];
+  }
+
   private normalizeMatchScore(score: unknown): number {
     const rawScore = Number(score || 0);
 
@@ -374,5 +444,17 @@ export class JobService {
 
     const normalizedScore = rawScore <= 1 ? rawScore * 100 : rawScore;
     return Math.max(0, Math.min(100, Math.round(normalizedScore)));
+  }
+
+  private compareNullableNumbers(
+    valueA: number | null,
+    valueB: number | null,
+    sortOrder: SortOrder,
+  ) {
+    if (valueA === null && valueB === null) return 0;
+    if (valueA === null) return 1;
+    if (valueB === null) return -1;
+
+    return sortOrder === SortOrder.DESC ? valueB - valueA : valueA - valueB;
   }
 }

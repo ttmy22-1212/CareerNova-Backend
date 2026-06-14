@@ -9,6 +9,11 @@ import {
   SalaryFilterDto,
   SalaryTrendDto,
 } from './dto/salary-insights.dto';
+import {
+  getNormalizedSalaryRange,
+  getSalaryRepresentativeAnnualUsd,
+  summarizeNormalizedSalaries,
+} from '../../common/utils/salary.util';
 
 @Injectable()
 export class SalaryInsightsService {
@@ -26,10 +31,20 @@ export class SalaryInsightsService {
       const now = new Date();
       const currentYear = now.getFullYear(); // 2026
 
-      const aggregate = await this.prisma.salary.aggregate({
+      const salaryRecords = await this.prisma.salary.findMany({
         where: { job: jobWhereInput },
-        _avg: { med_salary: true },
+        select: {
+          min_salary: true,
+          max_salary: true,
+          med_salary: true,
+          currency: true,
+          pay_period: true,
+          job: {
+            select: { listed_time: true },
+          },
+        },
       });
+      const salarySummary = summarizeNormalizedSalaries(salaryRecords);
 
       const openJobsCount = await this.prisma.job.count({
         where: {
@@ -38,43 +53,22 @@ export class SalaryInsightsService {
         },
       });
 
-      const allSalaries = await this.prisma.salary.findMany({
-        where: { job: jobWhereInput },
-        select: { med_salary: true },
-        orderBy: { med_salary: 'asc' },
-      });
-      const salaries = allSalaries.map((s) => Number(s.med_salary || 0));
-
-      const avgSalaryThisYear = await this.prisma.salary.aggregate({
-        where: {
-          job: {
-            ...jobWhereInput,
-            listed_time: {
-              gte: new Date(`${currentYear}-01-01`),
-              lte: new Date(`${currentYear}-12-31`),
-            },
-          },
-        },
-        _avg: { med_salary: true },
-      });
-
-      const avgSalaryLastYear = await this.prisma.salary.aggregate({
-        where: {
-          job: {
-            ...jobWhereInput,
-            listed_time: {
-              gte: new Date(`${currentYear - 1}-01-01`),
-              lte: new Date(`${currentYear - 1}-12-31`),
-            },
-          },
-        },
-        _avg: { med_salary: true },
-      });
-
-      const thisYearAvg = Number(
-        avgSalaryThisYear._avg?.med_salary || aggregate._avg?.med_salary || 0,
+      const currentYearSummary = summarizeNormalizedSalaries(
+        salaryRecords.filter(
+          (record) => record.job?.listed_time?.getFullYear() === currentYear,
+        ),
       );
-      const lastYearAvg = Number(avgSalaryLastYear._avg?.med_salary || 0);
+      const lastYearSummary = summarizeNormalizedSalaries(
+        salaryRecords.filter(
+          (record) =>
+            record.job?.listed_time?.getFullYear() === currentYear - 1,
+        ),
+      );
+      const thisYearAvg =
+        currentYearSummary.count > 0
+          ? currentYearSummary.average
+          : salarySummary.average;
+      const lastYearAvg = lastYearSummary.average;
 
       let growthPercentage = 0;
       if (lastYearAvg > 0) {
@@ -84,9 +78,9 @@ export class SalaryInsightsService {
       }
 
       const result = {
-        average_salary: Math.round(Number(aggregate._avg?.med_salary || 0)),
-        median_salary: this.calculatePercentile(salaries, 0.5),
-        percentile_75: this.calculatePercentile(salaries, 0.75),
+        average_salary: Math.round(salarySummary.average),
+        median_salary: Math.round(salarySummary.median),
+        percentile_75: Math.round(salarySummary.percentile75),
         open_jobs_count: openJobsCount,
         salary_growth_percentage: Number(growthPercentage.toFixed(1)),
       };
@@ -120,24 +114,38 @@ export class SalaryInsightsService {
 
       const results = await Promise.all(
         categories.map(async (c) => {
-          const stats = await this.prisma.salary.aggregate({
+          const salaries = await this.prisma.salary.findMany({
             where: { job: { ...jobWhereInput, job_category: c.job_category } },
-            _min: { min_salary: true },
-            _max: { max_salary: true },
-            _avg: { med_salary: true },
+            select: {
+              min_salary: true,
+              max_salary: true,
+              med_salary: true,
+              currency: true,
+              pay_period: true,
+            },
           });
+          const normalizedRanges = salaries
+            .map(getNormalizedSalaryRange)
+            .filter((range): range is NonNullable<typeof range> => !!range);
+          const summary = summarizeNormalizedSalaries(salaries);
+
+          if (normalizedRanges.length === 0) return null;
 
           return {
             role: c.job_category || 'N/A',
-            min_salary: Math.round(Number(stats._min?.min_salary || 0)),
-            avg_salary: Math.round(Number(stats._avg?.med_salary || 0)),
-            max_salary: Math.round(Number(stats._max?.max_salary || 0)),
-            sample_count: c._count.job_id, // Khớp với sample_count trong DTO
+            min_salary: Math.round(
+              Math.min(...normalizedRanges.map((range) => range.min)),
+            ),
+            avg_salary: Math.round(summary.average),
+            max_salary: Math.round(
+              Math.max(...normalizedRanges.map((range) => range.max)),
+            ),
+            sample_count: summary.count,
           };
         }),
       );
 
-      return results;
+      return results.filter((item): item is SalaryByRoleDto => item !== null);
     } catch (error: unknown) {
       this.handleError(error, 'By Role');
       return [];
@@ -167,20 +175,30 @@ export class SalaryInsightsService {
 
       const results = await Promise.all(
         locations.map(async (l) => {
-          const stats = await this.prisma.salary.aggregate({
+          const salaries = await this.prisma.salary.findMany({
             where: { job: { ...jobWhereInput, location: l.location } },
-            _avg: { med_salary: true },
+            select: {
+              min_salary: true,
+              max_salary: true,
+              med_salary: true,
+              currency: true,
+              pay_period: true,
+            },
           });
+          const summary = summarizeNormalizedSalaries(salaries);
+          if (summary.count === 0) return null;
 
           return {
             location: l.location || 'N/A',
-            avg_salary: Math.round(Number(stats._avg?.med_salary || 0)),
+            avg_salary: Math.round(summary.average),
             job_count: l._count.job_id,
           };
         }),
       );
 
-      return results;
+      return results.filter(
+        (item): item is SalaryByLocationDto => item !== null,
+      );
     } catch (error: unknown) {
       this.handleError(error, 'By Location');
       return [];
@@ -210,26 +228,34 @@ export class SalaryInsightsService {
             where: { skill_id: s.skill_id },
           });
 
-          const salaryStats = await this.prisma.salary.aggregate({
+          const salaries = await this.prisma.salary.findMany({
             where: {
               job: {
                 ...jobWhereInput,
                 job_skills: { some: { skill_id: s.skill_id } },
               },
             },
-            _avg: { med_salary: true },
+            select: {
+              min_salary: true,
+              max_salary: true,
+              med_salary: true,
+              currency: true,
+              pay_period: true,
+            },
           });
+          const summary = summarizeNormalizedSalaries(salaries);
+          if (summary.count === 0) return null;
 
           return {
             skill_id: s.skill_id,
             skill_name: skillInfo?.skill_name || 'Unknown',
-            avg_salary: Math.round(Number(salaryStats._avg?.med_salary || 0)),
+            avg_salary: Math.round(summary.average),
             job_count: s._count.job_id,
           };
         }),
       );
 
-      return results;
+      return results.filter((item): item is SalaryBySkillDto => item !== null);
     } catch (error: unknown) {
       this.handleError(error, 'By Skill');
       return [];
@@ -248,7 +274,11 @@ export class SalaryInsightsService {
 
       const salaryRecords = await this.prisma.salary.findMany({
         where: {
-          med_salary: { not: null },
+          OR: [
+            { min_salary: { not: null } },
+            { max_salary: { not: null } },
+            { med_salary: { not: null } },
+          ],
           job: {
             ...jobWhereInput,
             listed_time: { gte: sixMonthsAgo },
@@ -259,7 +289,11 @@ export class SalaryInsightsService {
           },
         },
         select: {
+          min_salary: true,
+          max_salary: true,
           med_salary: true,
+          currency: true,
+          pay_period: true,
           job: {
             select: {
               listed_time: true,
@@ -291,6 +325,8 @@ export class SalaryInsightsService {
       for (const record of salaryRecords) {
         if (!record.job?.listed_time || !record.job?.formatted_experience_level)
           continue;
+        const normalizedSalary = getSalaryRepresentativeAnnualUsd(record);
+        if (normalizedSalary === null) continue;
 
         const date = new Date(record.job.listed_time);
         const monthStr = monthNames[date.getMonth()];
@@ -303,7 +339,7 @@ export class SalaryInsightsService {
           monthStr,
           level,
         };
-        current.totalSalary += Number(record.med_salary);
+        current.totalSalary += normalizedSalary;
         current.count += 1;
         groupMap.set(key, current);
       }
@@ -349,16 +385,6 @@ export class SalaryInsightsService {
     }
 
     return condition;
-  }
-
-  private calculatePercentile(data: number[], percentile: number): number {
-    if (data.length === 0) return 0;
-    const index = Math.floor(percentile * (data.length - 1));
-    const value = data[index];
-    this.logger.debug(
-      `Calculated percentile ${percentile}: ${value} (index ${index})`,
-    );
-    return value;
   }
 
   private handleError(error: unknown, context: string) {

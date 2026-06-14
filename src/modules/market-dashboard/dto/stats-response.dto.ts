@@ -7,7 +7,7 @@ export class StatsCardResponseDto {
 
   // CARD 2: Avg. IT Salary
   avg_it_salary: {
-    average: number; // Trung bình cộng med_salary (đã chuẩn hóa USD/Năm)
+    average: number; // Trung bình salary đại diện (đã chuẩn hóa USD/Năm)
     min: number; // Thấp nhất của min_salary (đã chuẩn hóa)
     max: number; // Cao nhất của max_salary (đã chuẩn hóa)
   };
