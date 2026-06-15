@@ -508,7 +508,7 @@ export class MarketDashboardService {
   }
 
   /**
-   * API 5: BIỂU ĐỒ CỘT ĐÔI DẢI LƯƠNG (ALL LEVELS)
+   * API 5: BIỂU ĐỒ CỘT ĐÔI DẢI LƯƠNG THEO SKILL CATEGORY (ALL LEVELS)
    */
   async getSalaryRanges(
     filters: DashboardFilterDto,
@@ -526,79 +526,110 @@ export class MarketDashboardService {
       const salaryJobWhere: Prisma.JobWhereInput = {
         ...baseWhere,
         listed_time: { gte: currentStart, lte: currentEnd },
-        AND: [
-          ...(Array.isArray(baseWhere?.AND)
-            ? baseWhere.AND
-            : baseWhere?.AND
-              ? [baseWhere.AND]
-              : []),
-          { job_category: { not: null } },
-          { job_category: { not: '' } },
-        ],
+        salaries: {
+          some: {
+            OR: [
+              { min_salary: { not: null } },
+              { max_salary: { not: null } },
+              { med_salary: { not: null } },
+            ],
+          },
+        },
       };
 
-      const salaryRecords = await this.prisma.salary.findMany({
+      const jobSkillRecords = await this.prisma.jobSkill.findMany({
         where: {
           job: salaryJobWhere,
-          OR: [
-            { min_salary: { not: null } },
-            { max_salary: { not: null } },
-            { med_salary: { not: null } },
-          ],
+          skill: {
+            category: { not: null },
+          },
         },
         select: {
-          min_salary: true,
-          max_salary: true,
-          med_salary: true,
-          currency: true,
-          pay_period: true,
+          job_id: true,
+          skill: {
+            select: { category: true },
+          },
           job: {
-            select: { job_category: true },
+            select: {
+              salaries: {
+                select: {
+                  min_salary: true,
+                  max_salary: true,
+                  med_salary: true,
+                  currency: true,
+                  pay_period: true,
+                },
+              },
+            },
           },
         },
       });
 
-      const roleSalaryMap = new Map<
+      const categorySalaryMap = new Map<
         string,
-        { minSalary: number; maxSalary: number; sampleCount: number }
+        {
+          minSalary: number;
+          maxSalary: number;
+          jobIds: Set<string>;
+          salarySampleCount: number;
+        }
       >();
+      const seenCategoryJobs = new Set<string>();
 
-      for (const salary of salaryRecords) {
-        const role = salary.job?.job_category?.trim();
-        const normalizedSalary = getNormalizedSalaryRange(salary);
-        if (!role || !normalizedSalary) continue;
+      for (const record of jobSkillRecords) {
+        const category = record.skill.category?.trim();
+        if (!category) continue;
 
-        const current = roleSalaryMap.get(role) || {
+        const jobId = record.job_id.toString();
+        const categoryJobKey = `${category}:${jobId}`;
+        if (seenCategoryJobs.has(categoryJobKey)) continue;
+        seenCategoryJobs.add(categoryJobKey);
+
+        const normalizedRanges = record.job.salaries
+          .map(getNormalizedSalaryRange)
+          .filter((range): range is NonNullable<typeof range> => !!range);
+        if (normalizedRanges.length === 0) continue;
+
+        const current = categorySalaryMap.get(category) || {
           minSalary: Infinity,
           maxSalary: -Infinity,
-          sampleCount: 0,
+          jobIds: new Set<string>(),
+          salarySampleCount: 0,
         };
 
-        current.minSalary = Math.min(current.minSalary, normalizedSalary.min);
-        current.maxSalary = Math.max(current.maxSalary, normalizedSalary.max);
-        current.sampleCount += 1;
-        roleSalaryMap.set(role, current);
+        for (const normalizedSalary of normalizedRanges) {
+          current.minSalary = Math.min(current.minSalary, normalizedSalary.min);
+          current.maxSalary = Math.max(current.maxSalary, normalizedSalary.max);
+          current.salarySampleCount += 1;
+        }
+        current.jobIds.add(jobId);
+        categorySalaryMap.set(category, current);
       }
 
-      return Array.from(roleSalaryMap.entries())
-        .map(([role, data]) => ({
-          role,
+      return Array.from(categorySalaryMap.entries())
+        .map(([category, data]) => ({
+          role: category,
           min_salary:
             data.minSalary === Infinity ? 0 : Math.round(data.minSalary),
           max_salary:
             data.maxSalary === -Infinity ? 0 : Math.round(data.maxSalary),
           currency: 'USD',
-          sample_count: data.sampleCount,
+          sample_count: data.jobIds.size,
+          salary_sample_count: data.salarySampleCount,
         }))
         .sort((a, b) => {
           if (b.sample_count !== a.sample_count) {
             return b.sample_count - a.sample_count;
           }
 
+          if (b.salary_sample_count !== a.salary_sample_count) {
+            return b.salary_sample_count - a.salary_sample_count;
+          }
+
           return b.max_salary - a.max_salary;
         })
-        .slice(0, 6)
-        .map(({ sample_count, ...item }) => item);
+        .slice(0, 7)
+        .map(({ sample_count, salary_sample_count, ...item }) => item);
     } catch (error: unknown) {
       this.handleError(error, 'Salary Ranges');
       throw new BadRequestException('Could not compile salary ranges');

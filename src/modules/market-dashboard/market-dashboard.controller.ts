@@ -69,7 +69,7 @@ export class MarketDashboardController {
   @Get('salary-ranges')
   @ApiOperation({
     summary:
-      'Dải phân bố lương Min-Max theo vị trí công việc gộp All Levels (Salary Ranges)',
+      'Dải phân bố lương Min-Max theo nhóm kỹ năng gộp All Levels (Salary Ranges)',
   })
   @ApiResponse({ status: 200, type: [SalaryRangesResponseDto] })
   async getSalaryRanges(@Query() filters: DashboardFilterDto) {
