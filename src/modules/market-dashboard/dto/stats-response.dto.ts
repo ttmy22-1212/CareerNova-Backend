@@ -17,8 +17,8 @@ export class StatsCardResponseDto {
     count: number; // Tổng số company_id duy nhất đang tuyển dụng thực tế
   };
 
-  // CARD 4: Market Growth
-  market_growth: {
-    yoy_percentage: number; // Tăng trưởng YoY so với cùng kỳ năm ngoái
+  // CARD 4: Vị trí thực tập (work_type = internship)
+  internship_jobs: {
+    count: number;
   };
 }

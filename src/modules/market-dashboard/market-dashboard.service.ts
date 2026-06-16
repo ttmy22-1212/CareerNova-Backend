@@ -158,34 +158,16 @@ export class MarketDashboardService {
         },
       });
 
-      // --- CARD 4: Market Growth YoY (So cùng kỳ năm ngoái) ---
-      const yoyCurrentStart = currentStart;
-      const yoyCurrentEnd = currentEnd;
-
-      const yoyPastStart = new Date(yoyCurrentStart);
-      yoyPastStart.setFullYear(yoyPastStart.getFullYear() - 1);
-      const yoyPastEnd = new Date(yoyCurrentEnd);
-      yoyPastEnd.setFullYear(yoyPastEnd.getFullYear() - 1);
-
-      const marketJobsCountA = await this.prisma.job.count({
+      // --- CARD 4: Vị trí thực tập (work_type = internship) ---
+      // Hữu ích cho sinh viên: số cơ hội thực tập đang mở
+      const internshipJobsCount = await this.prisma.job.count({
         where: {
           ...baseWhere,
-          listed_time: { gte: yoyCurrentStart, lte: yoyCurrentEnd },
+          listed_time: { gte: currentStart, lte: currentEnd },
+          work_type: { in: this.getWorkTypeVariants('internship') },
+          OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
         },
       });
-
-      const marketJobsCountB = await this.prisma.job.count({
-        where: {
-          ...baseWhere,
-          listed_time: { gte: yoyPastStart, lte: yoyPastEnd },
-        },
-      });
-
-      let yoyGrowthPercentage = 0;
-      if (marketJobsCountB > 0) {
-        yoyGrowthPercentage =
-          ((marketJobsCountA - marketJobsCountB) / marketJobsCountB) * 100;
-      }
 
       return {
         active_jobs: {
@@ -200,8 +182,8 @@ export class MarketDashboardService {
         companies_hiring: {
           count: uniqueCompanies.length,
         },
-        market_growth: {
-          yoy_percentage: Number(yoyGrowthPercentage.toFixed(1)),
+        internship_jobs: {
+          count: internshipJobsCount,
         },
       };
     } catch (error: unknown) {
@@ -418,85 +400,109 @@ export class MarketDashboardService {
       currentStart.setDate(currentEnd.getDate() - 7);
       const baseWhere = this.buildBaseWhereCondition(filters);
 
-      const savedJobGroups = await this.prisma.savedJob.groupBy({
-        by: ['job_id'],
-        where: {
-          created_at: { gte: currentStart, lte: currentEnd },
-          job: {
-            ...baseWhere,
-            OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
-          },
-        },
+      const postingWhere = {
+        ...baseWhere,
+        listed_time: { gte: currentStart, lte: currentEnd },
+        search_group: { not: null },
+        OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
+      };
+
+      // Gom theo nhóm ngành (search_group), đếm số tin tuyển đăng trong tuần → nhu cầu thị trường
+      const groupCounts = await this.prisma.job.groupBy({
+        by: ['search_group'],
+        where: postingWhere,
         _count: { job_id: true },
         orderBy: { _count: { job_id: 'desc' } },
         take: 5,
       });
 
-      if (savedJobGroups.length === 0) {
+      if (groupCounts.length === 0) {
         return [];
       }
 
-      const jobIds = savedJobGroups.map((item) => item.job_id);
-      const saveCountByJobId = new Map(
-        savedJobGroups.map((item) => [
-          item.job_id.toString(),
-          item._count.job_id,
-        ]),
+      const topGroups = groupCounts
+        .map((g) => g.search_group)
+        .filter((g): g is string => g !== null);
+      const postingCountByGroup = new Map(
+        groupCounts
+          .filter((g) => g.search_group !== null)
+          .map((g) => [g.search_group as string, g._count.job_id]),
       );
 
+      // Lấy chi tiết các tin thuộc top group để tính lương TB, ngành, số công ty
       const jobs = await this.prisma.job.findMany({
-        where: { job_id: { in: jobIds } },
+        where: { ...postingWhere, search_group: { in: topGroups } },
         select: {
-          job_id: true,
-          title: true,
+          search_group: true,
           job_category: true,
           location: true,
           work_type: true,
-          company: {
-            select: { name: true },
-          },
-          salaries: {
-            select: {
-              min_salary: true,
-              max_salary: true,
-              med_salary: true,
-              currency: true,
-              pay_period: true,
-            },
-          },
+          company_id: true,
+          applies: true,
+          views: true,
+          is_remote: true,
         },
       });
 
-      const results: HotJobItemDto[] = jobs
-        .map((job) => {
-          const salaryValues = job.salaries
-            .map(getSalaryRepresentativeAnnualUsd)
-            .filter((salary): salary is number => salary !== null);
-          const saveCount = saveCountByJobId.get(job.job_id.toString()) || 0;
+      const aggByGroup = new Map<
+        string,
+        {
+          companyIds: Set<string>;
+          jobCategory: string | null;
+          location: string | null;
+          workType: string | null;
+          totalApplies: number;
+          totalViews: number;
+          remoteCount: number;
+        }
+      >();
+
+      for (const job of jobs) {
+        if (!job.search_group) continue;
+        const entry = aggByGroup.get(job.search_group) || {
+          companyIds: new Set<string>(),
+          jobCategory: null,
+          location: null,
+          workType: null,
+          totalApplies: 0,
+          totalViews: 0,
+          remoteCount: 0,
+        };
+        if (job.company_id) entry.companyIds.add(job.company_id.toString());
+        if (!entry.jobCategory && job.job_category)
+          entry.jobCategory = job.job_category;
+        if (!entry.location && job.location) entry.location = job.location;
+        if (!entry.workType && job.work_type) entry.workType = job.work_type;
+        entry.totalApplies += job.applies || 0;
+        entry.totalViews += job.views || 0;
+        if (job.is_remote) entry.remoteCount += 1;
+        aggByGroup.set(job.search_group, entry);
+      }
+
+      const results: HotJobItemDto[] = topGroups
+        .map((group) => {
+          const agg = aggByGroup.get(group);
+          const postingCount = postingCountByGroup.get(group) || 0;
 
           return {
-            job_id: job.job_id.toString(),
-            title: job.title,
-            company_name: job.company?.name || null,
-            location: job.location,
-            work_type: job.work_type,
-            job_category: job.job_category || 'Khác',
-            save_count: saveCount,
-            job_count: saveCount,
-            avg_salary:
-              salaryValues.length > 0
-                ? Math.round(
-                    salaryValues.reduce((sum, salary) => sum + salary, 0) /
-                      salaryValues.length,
-                  )
-                : 0,
+            job_id: '',
+            title: group,
+            company_name: null,
+            location: agg?.location || null,
+            work_type: agg?.workType || null,
+            job_category: agg?.jobCategory || 'Khác',
+            job_count: postingCount,
+            company_count: agg?.companyIds.size || 0,
+            total_applies: agg?.totalApplies || 0,
+            total_views: agg?.totalViews || 0,
+            remote_count: agg?.remoteCount || 0,
           };
         })
         .sort((a, b) => {
-          if (b.save_count !== a.save_count) {
-            return b.save_count - a.save_count;
+          if (b.job_count !== a.job_count) {
+            return b.job_count - a.job_count;
           }
-          return b.avg_salary - a.avg_salary;
+          return b.total_applies - a.total_applies;
         })
         .slice(0, 5);
 

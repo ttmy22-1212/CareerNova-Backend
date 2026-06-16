@@ -5,9 +5,11 @@ export class HotJobItemDto {
   location: string | null;
   work_type: string | null;
   job_category: string;
-  save_count: number;
   job_count: number;
-  avg_salary: number;
+  company_count: number;
+  total_applies: number;
+  total_views: number;
+  remote_count: number;
 }
 
 export class HotJobsResponseDto {

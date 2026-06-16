@@ -57,6 +57,25 @@ export class GetJobsQueryDto {
   @IsString()
   experience_level?: string;
 
+  @ApiPropertyOptional({
+    example: 'Software Engineer',
+    description: 'Lọc chính xác theo nhóm ngành (search_group)',
+  })
+  @IsOptional()
+  @IsString()
+  search_group?: string;
+
+  @ApiPropertyOptional({
+    example: 7,
+    description:
+      'Chỉ lấy tin đăng trong N ngày gần đây và còn hiệu lực (loại tin hết hạn)',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  listed_within_days?: number;
+
   @ApiPropertyOptional({ description: 'ID của CV để tính match_score' })
   @IsOptional()
   @IsUUID()

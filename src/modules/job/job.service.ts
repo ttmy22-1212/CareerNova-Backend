@@ -27,6 +27,8 @@ export class JobService {
       work_type,
       location,
       experience_level,
+      search_group,
+      listed_within_days,
       cv_id,
       min_match,
       sortBy = 'listed_time',
@@ -52,7 +54,19 @@ export class JobService {
       work_type ? this.buildWorkTypeFilter(work_type) : {},
       location ? { location: { contains: location, mode: 'insensitive' } } : {},
       experience_level ? { formatted_experience_level: experience_level } : {},
+      search_group ? { search_group } : {},
     ];
+
+    // Đồng bộ với "Top vị trí tuyển nhiều": chỉ tin đăng trong N ngày + còn hiệu lực
+    if (listed_within_days) {
+      const now = new Date();
+      const since = new Date(now);
+      since.setDate(now.getDate() - listed_within_days);
+      andConditions.push({ listed_time: { gte: since, lte: now } });
+      andConditions.push({
+        OR: [{ expiry_time: { gte: now } }, { expiry_time: null }],
+      });
+    }
 
     if (
       matchScoreFilter &&
