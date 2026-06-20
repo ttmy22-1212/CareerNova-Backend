@@ -1022,21 +1022,27 @@ export class ProfileService {
 
     doc
       .font(fonts.bold)
-      .fontSize(24)
+      .fontSize(22)
       .fillColor('#0f172a')
-      .text('Hồ sơ Career Nova', 44, 34, { width: 360 });
+      .text('Hồ sơ Career Nova', 44, 26, { width: 420 });
+
+    doc
+      .font(fonts.regular)
+      .fontSize(9)
+      .fillColor('#2563eb')
+      .text('Phân tích kỹ năng & việc làm IT', 44, 54);
 
     doc
       .font(fonts.regular)
       .fontSize(10)
       .fillColor('#475569')
       .text(
-        `Ứng viên: ${this.valueOrEmpty(user.full_name)} | ${this.valueOrEmpty(user.email)}`,
+        `Ứng viên: ${this.valueOrEmpty(user.full_name)}  ·  ${this.valueOrEmpty(user.email)}`,
         44,
-        70,
+        72,
         { width: 500 },
       )
-      .text(`Xuất lúc: ${this.formatDateTime(new Date())}`, 44, 88);
+      .text(`Xuất lúc: ${this.formatDateTime(new Date())}`, 44, 90);
 
     doc.y = 146;
   }
@@ -1051,9 +1057,6 @@ export class ProfileService {
     );
 
     this.drawPdfSectionTitle(doc, fonts, 'Thông tin hồ sơ');
-    this.drawPdfRow(doc, fonts, 'Họ tên', user.full_name);
-    this.drawPdfRow(doc, fonts, 'Email', user.email);
-    this.drawPdfRow(doc, fonts, 'Vai trò', user.role);
     this.drawPdfRow(doc, fonts, 'Trường', user.school);
     this.drawPdfRow(
       doc,
@@ -1101,18 +1104,6 @@ export class ProfileService {
       'Ưu tiên remote',
       user.prefer_remote ? 'Có' : 'Không',
     );
-    this.drawPdfRow(
-      doc,
-      fonts,
-      'Trạng thái onboarding',
-      user.onboarding_completed ? 'Đã hoàn tất' : 'Chưa hoàn tất',
-    );
-    this.drawPdfRow(
-      doc,
-      fonts,
-      'Cho phép matching CV mặc định',
-      user.allow_default_cv_matching ? 'Đang bật' : 'Đang tắt',
-    );
   }
 
   private drawCvSummary(doc: PDFKit.PDFDocument, fonts: PdfFonts, user: any) {
@@ -1120,15 +1111,15 @@ export class ProfileService {
 
     if (user.default_cv) {
       this.drawPdfRow(doc, fonts, 'CV mặc định', user.default_cv.file_name);
-      this.drawPdfRow(
+      const cvSkillNames = (user.default_cv.cv_skills || [])
+        .map((item: any) => item.skill?.skill_name)
+        .filter(Boolean);
+      this.drawPdfTags(
         doc,
         fonts,
         'Kỹ năng trong CV mặc định',
-        this.formatList(
-          (user.default_cv.cv_skills || []).map(
-            (item: any) => item.skill?.skill_name,
-          ),
-        ),
+        cvSkillNames,
+        { bg: '#dbeafe', text: '#1d4ed8' },
       );
     } else {
       this.drawPdfParagraph(
@@ -1201,10 +1192,39 @@ export class ProfileService {
       ? gapReport.missing_skills
       : [];
 
-    this.ensurePdfSpace(doc, 128);
+    this.ensurePdfSpace(doc, 150);
+    const headerY = doc.y;
+    const headerW = doc.page.width - 88;
     doc
-      .roundedRect(44, doc.y, doc.page.width - 88, 34, 8)
+      .roundedRect(44, headerY, headerW, 34, 8)
       .fill(isDefault ? '#dbeafe' : '#f8fafc');
+
+    // Badge điểm phù hợp (góc phải header), màu theo mức điểm
+    const scoreText = this.formatMatchScore(match.match_score);
+    let titleWidth = headerW - 28;
+    if (scoreText !== 'Chưa có dữ liệu') {
+      const numeric = Number(match.match_score);
+      const pct = Number.isFinite(numeric)
+        ? numeric <= 1
+          ? numeric * 100
+          : numeric
+        : 0;
+      const scheme =
+        pct >= 80
+          ? { bg: '#dcfce7', text: '#15803d' }
+          : pct >= 65
+            ? { bg: '#dbeafe', text: '#1d4ed8' }
+            : { bg: '#fef3c7', text: '#b45309' };
+      doc.font(fonts.bold).fontSize(9);
+      const bw = doc.widthOfString(scoreText) + 16;
+      const bx = 44 + headerW - bw - 12;
+      doc.roundedRect(bx, headerY + 8, bw, 18, 6).fill(scheme.bg);
+      doc
+        .fillColor(scheme.text)
+        .text(scoreText, bx + 8, headerY + 11, { lineBreak: false });
+      titleWidth = headerW - bw - 44;
+    }
+
     doc
       .font(fonts.bold)
       .fontSize(11)
@@ -1212,26 +1232,12 @@ export class ProfileService {
       .text(
         `#${index} ${target}${isDefault ? ' — mặc định' : ''}`,
         58,
-        doc.y + 10,
-        { width: doc.page.width - 116 },
+        headerY + 11,
+        { width: titleWidth, lineBreak: false, ellipsis: true },
       );
-    doc.y += 48;
+    doc.y = headerY + 44;
 
-    this.drawPdfRow(
-      doc,
-      fonts,
-      'Kiểu matching',
-      match.match_type === 'cv_job'
-        ? 'Theo URL hoặc công việc cụ thể'
-        : 'Theo nhóm nghề',
-    );
     this.drawPdfRow(doc, fonts, 'CV sử dụng', match.cv?.file_name);
-    this.drawPdfRow(
-      doc,
-      fonts,
-      'Điểm phù hợp',
-      this.formatMatchScore(match.match_score),
-    );
     this.drawPdfRow(
       doc,
       fonts,
@@ -1242,27 +1248,38 @@ export class ProfileService {
     this.drawPdfRow(doc, fonts, 'Công ty', match.job?.company?.name);
     this.drawPdfRow(doc, fonts, 'Địa điểm', match.job?.location);
     this.drawPdfRow(doc, fonts, 'Hình thức', this.formatWorkType(match));
-    this.drawPdfRow(doc, fonts, 'Model', match.model_version);
-    this.drawPdfRow(doc, fonts, 'URL job', match.job?.job_posting_url);
 
-    this.drawPdfBulletList(
-      doc,
-      fonts,
-      'Kỹ năng đã khớp tốt',
-      this.formatMatchedSkills(matchedSkills, 8),
-    );
-    this.drawPdfBulletList(
-      doc,
-      fonts,
-      'Kỹ năng khớp một phần',
-      this.formatGapSkills(partialSkills, 8),
-    );
-    this.drawPdfBulletList(
-      doc,
-      fonts,
-      'Kỹ năng còn thiếu',
-      this.formatGapSkills(missingSkills, 8),
-    );
+    const matchedTags = [...matchedSkills]
+      .sort((a, b) => Number(b.contribution || 0) - Number(a.contribution || 0))
+      .slice(0, 14)
+      .map((s) =>
+        s.similarity != null
+          ? `${this.valueOrEmpty(s.skill_name)}  ${this.formatPercentValue(s.similarity)}`
+          : this.valueOrEmpty(s.skill_name),
+      );
+    const partialTags = [...partialSkills]
+      .slice(0, 14)
+      .map((s) =>
+        s.similarity != null
+          ? `${this.valueOrEmpty(s.skill_name)}  ${this.formatPercentValue(s.similarity)}`
+          : this.valueOrEmpty(s.skill_name),
+      );
+    const missingTags = [...missingSkills]
+      .slice(0, 14)
+      .map((s) => this.valueOrEmpty(s.skill_name));
+
+    this.drawPdfTags(doc, fonts, 'Kỹ năng đã khớp tốt', matchedTags, {
+      bg: '#dcfce7',
+      text: '#15803d',
+    });
+    this.drawPdfTags(doc, fonts, 'Kỹ năng khớp một phần', partialTags, {
+      bg: '#fef3c7',
+      text: '#b45309',
+    });
+    this.drawPdfTags(doc, fonts, 'Kỹ năng còn thiếu', missingTags, {
+      bg: '#fee2e2',
+      text: '#b91c1c',
+    });
 
     doc.moveDown(0.5);
   }
@@ -1344,34 +1361,73 @@ export class ProfileService {
     doc.moveDown(0.9);
   }
 
-  private drawPdfBulletList(
+  /**
+   * Vẽ một danh sách kỹ năng dưới dạng "pill" (thẻ bo tròn có màu), tự xuống
+   * dòng và sang trang khi tràn — đẹp và dễ đọc hơn danh sách gạch đầu dòng.
+   */
+  private drawPdfTags(
     doc: PDFKit.PDFDocument,
     fonts: PdfFonts,
     title: string,
     items: string[],
+    scheme: { bg: string; text: string },
   ) {
-    this.ensurePdfSpace(doc, 54);
+    this.ensurePdfSpace(doc, 44);
     doc
       .font(fonts.bold)
       .fontSize(10)
       .fillColor('#0f172a')
       .text(title, 44, doc.y);
-    doc.moveDown(0.25);
+    doc.moveDown(0.35);
 
-    const list = items.length > 0 ? items : ['Chưa có dữ liệu.'];
-    list.forEach((item) => {
-      this.ensurePdfSpace(doc, 28);
+    if (!items.length) {
       doc
         .font(fonts.regular)
         .fontSize(9.5)
-        .fillColor('#334155')
-        .text(`• ${item}`, 58, doc.y, {
-          width: doc.page.width - 102,
-          lineGap: 2,
-        });
-      doc.moveDown(0.25);
-    });
-    doc.moveDown(0.45);
+        .fillColor('#94a3b8')
+        .text('Chưa có dữ liệu.', 58, doc.y);
+      doc.moveDown(0.5);
+      return;
+    }
+
+    const startX = 58;
+    const maxX = doc.page.width - 44;
+    const padX = 7;
+    const fontSize = 8.5;
+    const pillH = 16;
+    const rowGap = 6;
+    const colGap = 6;
+
+    this.ensurePdfSpace(doc, pillH + rowGap);
+    let x = startX;
+    let y = doc.y;
+    doc.font(fonts.regular).fontSize(fontSize);
+
+    for (const raw of items) {
+      const label = String(raw);
+      const w = doc.widthOfString(label) + padX * 2;
+      // Xuống dòng khi vượt mép phải
+      if (x + w > maxX && x > startX) {
+        x = startX;
+        y += pillH + rowGap;
+        const bottom = doc.page.height - doc.page.margins.bottom - 36;
+        if (y + pillH > bottom) {
+          doc.addPage();
+          doc.rect(0, 0, doc.page.width, 8).fill('#2563eb');
+          y = 42;
+        }
+      }
+      doc.roundedRect(x, y, w, pillH, 4).fill(scheme.bg);
+      doc
+        .fillColor(scheme.text)
+        .font(fonts.regular)
+        .fontSize(fontSize)
+        .text(label, x + padX, y + 4, { lineBreak: false });
+      x += w + colGap;
+    }
+
+    doc.y = y + pillH + rowGap;
+    doc.moveDown(0.3);
   }
 
   private drawPdfFooters(doc: PDFKit.PDFDocument, fonts: PdfFonts) {
@@ -1448,56 +1504,6 @@ export class ProfileService {
       match.job?.is_remote ? 'Remote' : null,
     ].filter(Boolean);
     return this.formatList(values);
-  }
-
-  private formatMatchedSkills(
-    skills: MatchSkillSummary[],
-    limit: number,
-  ): string[] {
-    return [...skills]
-      .sort((a, b) => Number(b.contribution || 0) - Number(a.contribution || 0))
-      .slice(0, limit)
-      .map((skill) => {
-        const parts = [
-          this.valueOrEmpty(skill.skill_name),
-          skill.similarity != null
-            ? `độ khớp ${this.formatPercentValue(skill.similarity)}`
-            : null,
-          skill.contribution != null
-            ? `đóng góp ${this.formatPercentValue(skill.contribution)}`
-            : null,
-        ].filter(Boolean);
-        return parts.join(' | ');
-      });
-  }
-
-  private formatGapSkills(
-    skills: MatchSkillSummary[],
-    limit: number,
-  ): string[] {
-    return [...skills]
-      .sort((a, b) => {
-        const gapDiff = Number(b.gap || 0) - Number(a.gap || 0);
-        if (gapDiff !== 0) return gapDiff;
-        return Number(b.weight || 0) - Number(a.weight || 0);
-      })
-      .slice(0, limit)
-      .map((skill) => {
-        const parts = [
-          this.valueOrEmpty(skill.skill_name),
-          skill.gap != null
-            ? `gap ${this.formatPercentValue(skill.gap)}`
-            : null,
-          skill.similarity != null
-            ? `độ khớp ${this.formatPercentValue(skill.similarity)}`
-            : null,
-          skill.weight != null
-            ? `trọng số ${this.formatPercentValue(skill.weight)}`
-            : null,
-          skill.matched_via ? `khớp qua ${skill.matched_via}` : null,
-        ].filter(Boolean);
-        return parts.join(' | ');
-      });
   }
 
   private formatMatchScore(score: unknown): string {
