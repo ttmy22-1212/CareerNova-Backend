@@ -15,6 +15,7 @@ import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import * as streamifier from 'streamifier';
 import PDFDocument from 'pdfkit';
 import * as fs from 'fs';
+import * as path from 'path';
 
 type PdfFonts = {
   regular: string;
@@ -976,28 +977,50 @@ export class ProfileService {
   }
 
   private registerPdfFonts(doc: PDFKit.PDFDocument): PdfFonts {
+    // Fonts bundled with the app. Listed FIRST so rendering is identical in
+    // dev and prod and never falls back to Helvetica, which lacks Vietnamese
+    // glyphs (ồ, ơ, ữ, ệ...) and produces garbled output. The candidate list
+    // covers every build layout: ts-node (src/), nest build emitting to
+    // dist/ or dist/src/, and the cwd-relative copy made by nest-cli assets.
+    const bundled = (file: string): string[] => [
+      path.join(__dirname, '..', '..', 'assets', 'fonts', file), // dist/assets
+      path.join(__dirname, '..', '..', '..', 'assets', 'fonts', file), // dist/src -> dist/assets
+      path.join(process.cwd(), 'dist', 'assets', 'fonts', file),
+      path.join(process.cwd(), 'src', 'assets', 'fonts', file), // ts-node dev
+    ];
+
     const regularPath = this.findExistingFile([
-      // Linux (production)
+      // Bundled with the app (works everywhere)
+      ...bundled('DejaVuSans.ttf'),
+      // Linux (production system fonts, fallback)
       '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
       '/usr/share/fonts/ttf-dejavu/DejaVuSans.ttf',
       '/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf',
       '/usr/share/fonts/truetype/ubuntu/Ubuntu[wdth,wght].ttf',
-      // Windows (development)
+      // Windows (development, fallback)
       'C:\\Windows\\Fonts\\segoeui.ttf',
       'C:\\Windows\\Fonts\\arial.ttf',
       'C:\\Windows\\Fonts\\calibri.ttf',
     ]);
     const boldPath = this.findExistingFile([
-      // Linux (production)
+      // Bundled with the app (works everywhere)
+      ...bundled('DejaVuSans-Bold.ttf'),
+      // Linux (production system fonts, fallback)
       '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
       '/usr/share/fonts/ttf-dejavu/DejaVuSans-Bold.ttf',
       '/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf',
       '/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf',
-      // Windows (development)
+      // Windows (development, fallback)
       'C:\\Windows\\Fonts\\segoeuib.ttf',
       'C:\\Windows\\Fonts\\arialbd.ttf',
       'C:\\Windows\\Fonts\\calibrib.ttf',
     ]);
+
+    if (!regularPath) {
+      this.logger.warn(
+        'PDF export: no Unicode font found, falling back to Helvetica (Vietnamese text will be garbled)',
+      );
+    }
 
     if (regularPath) {
       doc.registerFont('NovaRegular', regularPath);
@@ -1439,22 +1462,25 @@ export class ProfileService {
     ) {
       doc.switchToPage(pageIndex);
 
-      // Reset doc.y to a safe position above maxY before each text call so
-      // PDFKit never triggers an implicit addPage() when drawing the footer.
-      const safeY = doc.page.height - doc.page.margins.bottom - 20;
-      const footerY = doc.page.height - 34;
+      // The footer sits below the bottom margin (page.height - 34). Drawing
+      // text past the bottom margin makes PDFKit auto-append a blank page —
+      // even with lineBreak:false — which spawned one extra page per footer
+      // text call. Temporarily zero the bottom margin so PDFKit never thinks
+      // the footer overflows, then restore it.
+      const savedBottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
 
+      const footerY = doc.page.height - 34;
       doc.font(fonts.regular).fontSize(8).fillColor('#64748b');
 
-      doc.y = safeY;
       doc.text('Career Nova', 44, footerY, { width: 220, lineBreak: false });
-
-      doc.y = safeY;
       doc.text(`Trang ${pageIndex + 1}/${range.count}`, 44, footerY, {
         width: doc.page.width - 88,
         align: 'right',
         lineBreak: false,
       });
+
+      doc.page.margins.bottom = savedBottom;
     }
   }
 

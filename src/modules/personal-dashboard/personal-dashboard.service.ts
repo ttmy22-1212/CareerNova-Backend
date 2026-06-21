@@ -399,20 +399,33 @@ export class PersonalDashboardService {
         where: {
           AND: [
             {
+              // Khớp nhóm theo case-insensitive cho nhất quán với
+              // recommendation.service (Job.search_group có thể lệch hoa/thường
+              // so với nhãn nhóm của default match).
               OR: [
-                { search_group: searchGroup },
-                { job_category: searchGroup },
+                {
+                  search_group: {
+                    equals: searchGroup,
+                    mode: 'insensitive' as const,
+                  },
+                },
+                {
+                  job_category: {
+                    equals: searchGroup,
+                    mode: 'insensitive' as const,
+                  },
+                },
               ],
             },
             {
+              // "Job mới trong ngày" = được ĐĂNG hoặc được SCRAPE trong cửa sổ
+              // hôm qua→hôm nay. Trước đây nhánh scraped_at chỉ áp dụng khi
+              // listed_time == null, nên job scrape hôm nay nhưng mang
+              // listed_time cũ (trường hợp phổ biến nhất) bị bỏ sót → refresh
+              // không bao giờ chạy → không có lịch sử match mới.
               OR: [
                 { listed_time: { gte: startYesterday, lt: endToday } },
-                {
-                  AND: [
-                    { listed_time: null },
-                    { scraped_at: { gte: startYesterday, lt: endToday } },
-                  ],
-                },
+                { scraped_at: { gte: startYesterday, lt: endToday } },
               ],
             },
           ],

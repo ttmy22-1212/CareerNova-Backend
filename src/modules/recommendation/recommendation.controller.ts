@@ -10,7 +10,6 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import {
   CareerPathDto,
   PrioritySkillDto,
-  RecommendedJobDto,
   SavedReportItemDto,
 } from './dto/recommendation.dto';
 import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
@@ -21,18 +20,6 @@ import type { AuthenticatedRequest } from '../auth/interfaces/auth.interface';
 @Controller('recommendation')
 export class RecommendationController {
   constructor(private readonly recommendationService: RecommendationService) {}
-
-  @Get('top-jobs')
-  @ApiOperation({
-    summary: 'Lấy top 5 việc làm gợi ý trong vòng 1 tháng trở lại đây',
-  })
-  @ApiResponse({ status: 200, type: [RecommendedJobDto] })
-  async getTopJobs(@Req() req: AuthenticatedRequest) {
-    const userId = req.user.sub;
-    const data =
-      await this.recommendationService.getRecentRecommendedJobs(userId);
-    return { data };
-  }
 
   @Get('priority-skills')
   @ApiOperation({
