@@ -155,6 +155,13 @@ export class MatchingService {
           ...(matchTypeCheck === 'job_group'
             ? { search_group: searchGroupValueCheck }
             : {}),
+          ...(matchTypeCheck === 'cv_job' && dto.job_url
+            ? {
+                job: {
+                  job_posting_url: dto.job_url,
+                },
+              }
+            : {}),
         },
         orderBy: {
           created_at: 'desc',
