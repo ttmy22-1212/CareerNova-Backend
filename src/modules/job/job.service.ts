@@ -380,7 +380,9 @@ export class JobService {
       { match_score: { gte: threshold } },
     ];
 
-    if (threshold > 1) {
+    // >= 1 (không phải > 1) để ngưỡng 1% vẫn bắt được dữ liệu thang cũ 0-1
+    // (vd 0.5 = 50%); nếu chỉ gte:1 trên thang 0-1 sẽ lọc nhầm chỉ còn đúng 100%.
+    if (threshold >= 1) {
       scoreConditions.push({
         AND: [
           { match_score: { gte: threshold / 100 } },

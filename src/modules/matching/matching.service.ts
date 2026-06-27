@@ -141,6 +141,16 @@ export class MatchingService {
       if (!cv) {
         throw new NotFoundException('CV not found in system');
       }
+
+      // Chỉ chấm điểm TỪNG JOB (per-job) khi đây là CV mặc định của user và
+      // đang match theo NHÓM NGHỀ (không phải theo URL) — đúng phạm vi cần cho
+      // trang "Phù hợp nhất". CV khác / match URL thì giữ nguyên (không phình).
+      const userRec = await this.prisma.user.findUnique({
+        where: { user_id: userId },
+        select: { default_cv_id: true },
+      });
+      const scoreJobs = !dto.job_url && userRec?.default_cv_id === dto.cv_id;
+
       const matchTypeCheck = dto.job_url ? 'cv_job' : 'job_group';
       const searchGroupValueCheck = dto.job_url ? null : dto.search_group;
 
@@ -169,9 +179,26 @@ export class MatchingService {
       });
 
       if (existingMatch && !dto.force) {
+        // Nếu cần per-job (CV mặc định) mà CHƯA có bản ghi per-job nào cho nhóm
+        // này → bỏ qua cache, chạy Python để backfill điểm từng job (rẻ vì kỹ
+        // năng CV đã được cache, không gọi lại LLM).
+        let perJobReady = true;
+        if (scoreJobs) {
+          const perJobCount = await this.prisma.cvJobMatch.count({
+            where: {
+              cv_id: dto.cv_id,
+              match_type: 'existing_job',
+              search_group: dto.search_group,
+              job_id: { not: null },
+            },
+          });
+          perJobReady = perJobCount > 0;
+        }
+
         if (
-          matchTypeCheck === 'job_group' ||
-          (matchTypeCheck === 'cv_job' && existingMatch.job_id)
+          perJobReady &&
+          (matchTypeCheck === 'job_group' ||
+            (matchTypeCheck === 'cv_job' && existingMatch.job_id))
         ) {
           this.logger.log(
             `Found existing matching. Returning match_id: ${existingMatch.match_id}`,
@@ -236,6 +263,8 @@ export class MatchingService {
           formData.append('search_group', dto.search_group!);
           formData.append('source_id', String(userId));
           formData.append('cv_id', String(dto.cv_id));
+          // Bật chấm per-job cho CV mặc định để "Phù hợp nhất" có dữ liệu.
+          if (scoreJobs) formData.append('score_jobs', 'true');
         }
 
         this.logger.log(`Sending multipart request to FastAPI: ${targetUrl}`);

@@ -393,9 +393,23 @@ export class PersonalDashboardService {
     searchGroup: string,
   ): Promise<void> {
     try {
-      const { startYesterday, endToday } = this.getTodayAndYesterdayBounds();
+      // Chưa có bản ghi điểm TỪNG JOB (per-job) cho nhóm này → cần backfill,
+      // chạy lại match (force) bất kể có job mới hay không. Sau khi đã có per-job
+      // thì chỉ chạy lại khi có job mới (logic bên dưới).
+      const perJobCount = await this.prisma.cvJobMatch.count({
+        where: {
+          cv_id: cvId,
+          match_type: 'existing_job',
+          search_group: searchGroup,
+          job_id: { not: null },
+        },
+      });
+      const needPerJobBackfill = perJobCount === 0;
 
-      const latestRecentJob = await this.prisma.job.findFirst({
+      if (!needPerJobBackfill) {
+        const { startYesterday, endToday } = this.getTodayAndYesterdayBounds();
+
+        const latestRecentJob = await this.prisma.job.findFirst({
         where: {
           AND: [
             {
@@ -454,9 +468,10 @@ export class PersonalDashboardService {
         this.getTime(latestRecentJob.listed_time),
         this.getTime(latestRecentJob.scraped_at),
       );
-      const latestMatchTime = this.getTime(latestMatch?.created_at);
+        const latestMatchTime = this.getTime(latestMatch?.created_at);
 
-      if (latestMatchTime >= latestJobTime) return;
+        if (latestMatchTime >= latestJobTime) return;
+      }
 
       await this.matchingService.analyzeCv(
         {
