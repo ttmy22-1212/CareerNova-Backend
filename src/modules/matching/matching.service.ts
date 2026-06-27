@@ -222,11 +222,13 @@ export class MatchingService {
           targetUrl = `${algoBaseUrl}/api/v1/matching/job-url`;
           formData.append('url', dto.job_url);
           formData.append('source_id', String(userId));
+          formData.append('cv_id', String(dto.cv_id));
         } else {
           // Match theo Search Group tổng quan (Từ dữ liệu DB)
           targetUrl = `${algoBaseUrl}/api/v1/matching/search-group`;
           formData.append('search_group', dto.search_group!);
           formData.append('source_id', String(userId));
+          formData.append('cv_id', String(dto.cv_id));
         }
 
         this.logger.log(`Sending multipart request to FastAPI: ${targetUrl}`);
