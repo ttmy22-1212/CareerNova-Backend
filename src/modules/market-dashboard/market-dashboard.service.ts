@@ -390,7 +390,7 @@ export class MarketDashboardService {
   }
 
   /**
-   * API 4: TOP 5 CÔNG VIỆC ĐƯỢC LƯU NHIỀU NHẤT TRONG 7 NGÀY GẦN NHẤT
+   * API 4: TOP 5 NHÓM VỊ TRÍ ĐƯỢC TUYỂN NHIỀU NHẤT TRONG KHOẢNG THỜI GIAN CHỌN
    */
   async getHotJobs(filters: DashboardFilterDto): Promise<HotJobItemDto[]> {
     try {
@@ -398,9 +398,9 @@ export class MarketDashboardService {
         `Fetching hot jobs with filters: ${JSON.stringify(filters)}`,
       );
 
-      const currentEnd = new Date();
-      const currentStart = new Date(currentEnd);
-      currentStart.setDate(currentEnd.getDate() - 7);
+      const { currentStart, currentEnd } = this.calculateTimeBounds(
+        filters.time_range,
+      );
       const baseWhere = this.buildBaseWhereCondition(filters);
 
       const postingWhere = {
@@ -410,7 +410,7 @@ export class MarketDashboardService {
         OR: [{ expiry_time: { gte: currentEnd } }, { expiry_time: null }],
       };
 
-      // Gom theo nhóm ngành (search_group), đếm số tin tuyển đăng trong tuần → nhu cầu thị trường
+      // Gom theo nhóm ngành (search_group), đếm số tin tuyển đăng trong khoảng lọc → nhu cầu thị trường
       const groupCounts = await this.prisma.job.groupBy({
         by: ['search_group'],
         where: postingWhere,
