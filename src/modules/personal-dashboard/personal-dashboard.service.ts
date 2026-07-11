@@ -235,21 +235,25 @@ export class PersonalDashboardService {
           where: { job_id: defaultMatch.job_id },
           include: { skill: true },
         });
-        baseSkills = jobSkills.map((js) => ({
-          skill_id: js.skill_id,
-          category: js.skill.category || 'General',
-          weight: 1.0,
-        }));
+        baseSkills = jobSkills
+          .filter((js) => this.isTechnicalSkill(js.skill.type, js.skill.category))
+          .map((js) => ({
+            skill_id: js.skill_id,
+            category: js.skill.category || 'General',
+            weight: 1.0,
+          }));
       } else if (defaultMatch.search_group) {
         const groupWeights = await this.prisma.jobGroupSkillWeight.findMany({
           where: { search_group: defaultMatch.search_group },
           include: { skill: true },
         });
-        baseSkills = groupWeights.map((gw) => ({
-          skill_id: gw.skill_id,
-          category: gw.skill.category || 'General',
-          weight: Number(gw.weight_wi),
-        }));
+        baseSkills = groupWeights
+          .filter((gw) => this.isTechnicalSkill(gw.skill.type, gw.skill.category))
+          .map((gw) => ({
+            skill_id: gw.skill_id,
+            category: gw.skill.category || 'General',
+            weight: Number(gw.weight_wi),
+          }));
       }
 
       const categoryMap = new Map<string, number>();
@@ -691,5 +695,34 @@ export class PersonalDashboardService {
     const message = error instanceof Error ? error.message : 'Unknown error';
     const stack = error instanceof Error ? error.stack : '';
     this.logger.error(`PersonalDashboard ${context} failed: ${message}`, stack);
+  }
+
+  // ==========================================
+  //      SOFT SKILL FILTER (DÙNG CHUNG)
+  // ==========================================
+
+  /**
+   * Danh sách category được phân loại là soft skill / phi chuyên môn.
+   * Đồng bộ với MarketDashboardService.SOFT_SKILL_CATEGORIES.
+   */
+  private static readonly SOFT_SKILL_CATEGORIES = new Set([
+    'Personal Attributes',
+    'Social Skills',
+    'Communication',
+    'Initiative and Leadership',
+    'Critical Thinking and Problem Solving',
+    'Physical Abilities',
+    'Material Handling',
+    'Administrative Support and Clerical Tasks',
+    'Writing and Editing',
+    'Office and Productivity Equipment and Technology',
+  ]);
+
+  /** Chỉ nhận đúng kỹ năng có type `Specialized Skill`. */
+  private isTechnicalSkill(
+    type: string | null | undefined,
+    _category: string | null | undefined,
+  ): boolean {
+    return type?.trim().toLowerCase() === 'specialized skill';
   }
 }

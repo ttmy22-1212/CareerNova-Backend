@@ -319,6 +319,9 @@ export class MarketDashboardService {
           },
           skill: {
             category: { not: null },
+            // Dashboard thị trường chỉ hiển thị nhóm kỹ năng chuyên môn.
+            // Loại cả Common skill (kỹ năng mềm) và Certification.
+            type: { equals: 'Specialized Skill', mode: 'insensitive' },
           },
         },
         select: {
@@ -669,14 +672,15 @@ export class MarketDashboardService {
         },
         include: {
           skill: {
-            select: { skill_name: true },
+            select: { skill_name: true, type: true, category: true },
           },
         },
       });
 
-      // 2. Gom nhóm và đếm số lượng trên RAM bằng Map
+      // 2. Gom nhóm và đếm số lượng trên RAM bằng Map — bỏ qua soft skills
       const skillCountMap = new Map<number, { name: string; count: number }>();
       for (const js of jobSkillsRaw) {
+        if (!this.isTechnicalSkill(js.skill?.type, js.skill?.category)) continue;
         const existing = skillCountMap.get(js.skill_id);
         const skillName = js.skill?.skill_name || 'Unknown';
         if (existing) {
@@ -720,7 +724,7 @@ export class MarketDashboardService {
         this.calculateTimeBounds(filters.time_range);
       const baseWhere = this.buildBaseWhereCondition(filters);
 
-      // 1. Quét Kỳ A (Hiện tại) - include luôn thông tin Skill Name và Salary để xử lý trên RAM
+      // 1. Quét Kỳ A (Hiện tại) - include luôn thông tin Skill Name, Type, Category và Salary
       const currentJobSkillsRaw = await this.prisma.jobSkill.findMany({
         where: {
           job: {
@@ -730,7 +734,7 @@ export class MarketDashboardService {
           },
         },
         include: {
-          skill: { select: { skill_name: true } },
+          skill: { select: { skill_name: true, type: true, category: true } },
           job: {
             select: {
               salaries: {
@@ -779,6 +783,9 @@ export class MarketDashboardService {
       for (const js of currentJobSkillsRaw) {
         const skillId = js.skill_id;
         const skillName = js.skill?.skill_name || 'Unknown';
+
+        // Bỏ qua toàn bộ soft skills — chỉ giữ lại kỹ năng chuyên môn/kỹ thuật
+        if (!this.isTechnicalSkill(js.skill?.type, js.skill?.category)) continue;
 
         if (!currentSkillMap.has(skillId)) {
           currentSkillMap.set(skillId, {
@@ -844,6 +851,34 @@ export class MarketDashboardService {
   // ==========================================
   //      CÁC HÀM TRỢ GIÚP NỘI BỘ (HELPERS)
   // ==========================================
+
+  /**
+   * Danh sách category được phân loại là soft skill / phi chuyên môn.
+   * Dùng làm lớp lọc thứ hai sau khi đã lọc theo `type`.
+   */
+  private static readonly SOFT_SKILL_CATEGORIES = new Set([
+    // Kỹ năng mềm / tính cách cá nhân
+    'Personal Attributes',
+    'Social Skills',
+    'Communication',
+    'Initiative and Leadership',
+    'Critical Thinking and Problem Solving',
+    // Khả năng thể lực / vật lý
+    'Physical Abilities',
+    'Material Handling',
+    // Hành chính / văn phòng tổng quát
+    'Administrative Support and Clerical Tasks',
+    'Writing and Editing',
+    'Office and Productivity Equipment and Technology',
+  ]);
+
+  /** Chỉ nhận đúng kỹ năng có type `Specialized Skill`. */
+  private isTechnicalSkill(
+    type: string | null | undefined,
+    _category: string | null | undefined,
+  ): boolean {
+    return type?.trim().toLowerCase() === 'specialized skill';
+  }
 
   /**
    * Tạo điều kiện WHERE cơ bản cho bảng Job ăn theo bộ lọc Địa điểm và Hình thức

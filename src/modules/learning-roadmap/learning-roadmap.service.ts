@@ -40,10 +40,26 @@ export class LearningRoadmapService {
       const pathsFromDB = await this.prisma.learningPath.findMany({
         where: filters.skill
           ? {
-              skill_key: {
-                contains: filters.skill,
-                mode: 'insensitive',
-              },
+              OR: [
+                {
+                  skill_key: {
+                    contains: filters.skill,
+                    mode: 'insensitive',
+                  },
+                },
+                {
+                  path_title: {
+                    contains: filters.skill,
+                    mode: 'insensitive',
+                  },
+                },
+                {
+                  path_description: {
+                    contains: filters.skill,
+                    mode: 'insensitive',
+                  },
+                },
+              ],
             }
           : {},
         include: {
