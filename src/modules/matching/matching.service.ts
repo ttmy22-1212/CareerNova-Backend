@@ -274,7 +274,6 @@ export class MatchingService {
           message: string;
           output: string;
         };
-
         if (fastapiData && fastapiData.output) {
           try {
             const jsonStartIndex = fastapiData.output.indexOf('{');
@@ -297,6 +296,10 @@ export class MatchingService {
             this.logger.error(
               `Failed to parse Python raw output string: ${(parseError as Error).message}`,
             );
+            const rawOutput = fastapiData.output || '';
+            if (rawOutput.includes('API_KEY_EXHAUSTED') || rawOutput.toLowerCase().includes('exhausted') || rawOutput.toLowerCase().includes('cooldown')) {
+              throw new BadRequestException('Hết lượt matching');
+            }
             throw new Error(
               'Received invalid response format from Python matching service, unable to parse JSON output',
             );
@@ -307,9 +310,22 @@ export class MatchingService {
           );
         }
       } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
+        const errorMsg = (error as any).response?.data?.detail?.stderr || 
+                         (error as any).response?.data?.detail?.message || 
+                         (error as any).response?.data?.detail || 
+                         (error as any).message || '';
         this.logger.error(
-          `Failed to execute matching via FastAPI: ${error as Error}.message}`,
+          `Failed to execute matching via FastAPI: ${errorMsg}`,
         );
+        if (
+          typeof errorMsg === 'string' && 
+          (errorMsg.includes('API_KEY_EXHAUSTED') || errorMsg.toLowerCase().includes('cooldown') || errorMsg.toLowerCase().includes('exhausted'))
+        ) {
+          throw new BadRequestException('Hết lượt matching');
+        }
         throw new Error(
           'Python matching service responded with an error or network issue occurred',
         );
