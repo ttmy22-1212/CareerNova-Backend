@@ -1,8 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class LearningRoadmapFilterDto {
   @ApiPropertyOptional({ description: 'Từ khóa skill_key để lọc lộ trình' })
+  @IsOptional()
+  @IsString()
   skill?: string;
 
   @ApiPropertyOptional({
@@ -11,6 +13,8 @@ export class LearningRoadmapFilterDto {
     enum: ['All', 'Missing', 'Partial'],
     default: 'All',
   })
+  @IsOptional()
+  @IsIn(['All', 'Missing', 'Partial'])
   status?: 'All' | 'Missing' | 'Partial';
 
   @ApiPropertyOptional({
@@ -18,12 +22,16 @@ export class LearningRoadmapFilterDto {
     enum: ['All', 'Beginner', 'Intermediate', 'Advanced'],
     default: 'All',
   })
+  @IsOptional()
+  @IsIn(['All', 'Beginner', 'Intermediate', 'Advanced'])
   level?: 'All' | 'Beginner' | 'Intermediate' | 'Advanced';
 
   @ApiPropertyOptional({
     description: 'Số lượng lộ trình/khóa học tối đa muốn lấy',
     default: 6,
   })
+  @IsOptional()
+  @IsString()
   limit?: string;
 }
 
