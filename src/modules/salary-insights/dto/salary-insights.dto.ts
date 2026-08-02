@@ -1,10 +1,26 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString } from 'class-validator';
 
 export class SalaryFilterDto {
-  @ApiPropertyOptional() role?: string;
-  @ApiPropertyOptional() location?: string;
-  @ApiPropertyOptional() skill_id?: string;
-  @ApiPropertyOptional() level?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  role?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  location?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  skill_id?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  level?: string;
 }
 
 export class SalaryTrendDto {
