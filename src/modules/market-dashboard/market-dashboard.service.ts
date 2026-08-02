@@ -48,11 +48,25 @@ export class MarketDashboardService {
         select: { location: true },
       });
 
+      const uniqueParsed = new Set<string>();
+      for (const j of distinctLocations) {
+        if (j.location) {
+          const parsed = this.parseLocations(j.location);
+          parsed.forEach(p => uniqueParsed.add(p));
+        }
+      }
+
+      const parsedArray = Array.from(uniqueParsed).sort((a, b) => {
+        if (a === 'Khác') return 1;
+        if (b === 'Khác') return -1;
+        return a.localeCompare(b, 'vi');
+      });
+
       const locations = [
         { label: 'Tất cả khu vực', value: '' },
-        ...distinctLocations.map((j) => ({
-          label: j.location!,
-          value: j.location!,
+        ...parsedArray.map((loc) => ({
+          label: loc,
+          value: loc,
         })),
       ];
 
@@ -84,7 +98,7 @@ export class MarketDashboardService {
 
       const { currentStart, currentEnd, previousStart, previousEnd } =
         this.calculateTimeBounds(filters.time_range);
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       // --- CARD 1: Active Job Postings & Tỷ lệ tăng trưởng phụ ---
       const activeJobsCount = await this.prisma.job.count({
@@ -205,7 +219,7 @@ export class MarketDashboardService {
       const { currentStart, currentEnd } = this.calculateTimeBounds(
         filters.time_range,
       );
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       const jobs = await this.prisma.job.findMany({
         where: {
@@ -308,7 +322,7 @@ export class MarketDashboardService {
       const { currentStart, currentEnd } = this.calculateTimeBounds(
         filters.time_range,
       );
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       const jobs = await this.prisma.jobSkill.findMany({
         where: {
@@ -400,7 +414,7 @@ export class MarketDashboardService {
       const { currentStart, currentEnd } = this.calculateTimeBounds(
         filters.time_range,
       );
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       const postingWhere = {
         ...baseWhere,
@@ -529,7 +543,7 @@ export class MarketDashboardService {
       const { currentStart, currentEnd } = this.calculateTimeBounds(
         filters.time_range,
       );
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       const salaryJobWhere: Prisma.JobWhereInput = {
         ...baseWhere,
@@ -658,7 +672,7 @@ export class MarketDashboardService {
       const { currentStart, currentEnd } = this.calculateTimeBounds(
         filters.time_range,
       );
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       // 1. Chỉ dùng 1 câu query duy nhất kéo kèm cả skill_name lên RAM
       const jobSkillsRaw = await this.prisma.jobSkill.findMany({
@@ -721,7 +735,7 @@ export class MarketDashboardService {
 
       const { currentStart, currentEnd, previousStart, previousEnd } =
         this.calculateTimeBounds(filters.time_range);
-      const baseWhere = this.buildBaseWhereCondition(filters);
+      const baseWhere = await this.buildBaseWhereCondition(filters);
 
       // 1. Quét Kỳ A (Hiện tại) - include luôn thông tin Skill Name, Type, Category và Salary
       const currentJobSkillsRaw = await this.prisma.jobSkill.findMany({
@@ -879,17 +893,89 @@ export class MarketDashboardService {
     return type?.trim().toLowerCase() === 'specialized skill';
   }
 
+  private static readonly VIETNAM_PROVINCES = [
+    'Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng', 'Hải Phòng', 'Cần Thơ',
+    'An Giang', 'Bà Rịa - Vũng Tàu', 'Bắc Giang', 'Bắc Kạn', 'Bạc Liêu',
+    'Bắc Ninh', 'Bến Tre', 'Bình Định', 'Bình Dương', 'Bình Phước',
+    'Bình Thuận', 'Cà Mau', 'Cao Bằng', 'Đắk Lắk', 'Đắk Nông',
+    'Điện Biên', 'Đồng Nai', 'Đồng Tháp', 'Gia Lai', 'Hà Giang',
+    'Hà Nam', 'Hà Tĩnh', 'Hải Dương', 'Hậu Giang', 'Hòa Bình',
+    'Hưng Yên', 'Khánh Hòa', 'Kiên Giang', 'Kon Tum', 'Lai Châu',
+    'Lâm Đồng', 'Lạng Sơn', 'Lào Cai', 'Long An', 'Nam Định',
+    'Nghệ An', 'Ninh Bình', 'Ninh Thuận', 'Phú Thọ', 'Quảng Bình',
+    'Quảng Nam', 'Quảng Ngãi', 'Quảng Ninh', 'Quảng Trị', 'Sóc Trăng',
+    'Sơn La', 'Tây Ninh', 'Thái Bình', 'Thái Nguyên', 'Thanh Hóa',
+    'Thừa Thiên Huế', 'Tiền Giang', 'Trà Vinh', 'Tuyên Quang', 'Vĩnh Long',
+    'Vĩnh Phúc', 'Yên Bái', 'Phú Yên'
+  ];
+
+  private parseLocations(raw: string): string[] {
+    const normalized = raw.toLowerCase();
+    const results = new Set<string>();
+
+    // 1. Alias mapping
+    if (/ho chi minh|hồ chí minh|\bhcm\b/.test(normalized)) {
+      results.add('Hồ Chí Minh');
+    }
+    if (/ha noi|hà nội|\bhn\b/.test(normalized)) {
+      results.add('Hà Nội');
+    }
+    if (/da nang|đà nẵng/.test(normalized)) {
+      results.add('Đà Nẵng');
+    }
+    if (/\bhue\b|\bhuế\b|thua thien hue|thừa thiên huế/.test(normalized)) {
+      results.add('Thừa Thiên Huế');
+    }
+    if (/vung tau|vũng tàu|ba ria|bà rịa/.test(normalized)) {
+      results.add('Bà Rịa - Vũng Tàu');
+    }
+
+    // 2. Scan other provinces
+    const skip = ['Hồ Chí Minh', 'Hà Nội', 'Đà Nẵng', 'Thừa Thiên Huế', 'Bà Rịa - Vũng Tàu'];
+    for (const province of MarketDashboardService.VIETNAM_PROVINCES) {
+      if (skip.includes(province)) continue;
+      const noAccent = province.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').toLowerCase();
+      if (normalized.includes(province.toLowerCase()) || normalized.includes(noAccent)) {
+        results.add(province);
+      }
+    }
+
+    if (results.size === 0) {
+      return ['Khác'];
+    }
+    return Array.from(results);
+  }
+
   /**
    * Tạo điều kiện WHERE cơ bản cho bảng Job ăn theo bộ lọc Địa điểm và Hình thức
    */
-  private buildBaseWhereCondition(
+  private async buildBaseWhereCondition(
     filters: DashboardFilterDto,
-  ): Prisma.Args<typeof this.prisma.job, 'findMany'>['where'] {
+  ): Promise<Prisma.Args<typeof this.prisma.job, 'findMany'>['where']> {
     const condition: Prisma.Args<typeof this.prisma.job, 'findMany'>['where'] =
       {};
 
     if (filters.location) {
-      condition.location = filters.location;
+      const distinctLocations = await this.prisma.job.findMany({
+        where: {
+          AND: [{ location: { not: null } }, { location: { not: '' } }],
+        },
+        distinct: ['location'],
+        select: { location: true },
+      });
+
+      const matchingRawLocations = distinctLocations
+        .map((j) => j.location!)
+        .filter((raw) => {
+          const parsed = this.parseLocations(raw);
+          return parsed.includes(filters.location!);
+        });
+
+      if (matchingRawLocations.length > 0) {
+        condition.location = { in: matchingRawLocations };
+      } else {
+        condition.location = '___NOT_FOUND___';
+      }
     }
     if (filters.work_type) {
       const normalizedWorkType = this.normalizeWorkType(filters.work_type);
