@@ -247,7 +247,13 @@ export class RecommendationService {
         },
       });
 
-      return matches.map((m) => {
+      // Gộp các lượt match trùng nhau (cùng CV + cùng báo cáo) — mỗi lần chạy đối
+      // sánh tạo một dòng cvJobMatch mới, nên một nhóm nghề chạy nhiều lần sẽ sinh
+      // ra hàng chục báo cáo y hệt. Chỉ giữ lượt MỚI NHẤT cho mỗi báo cáo (matches
+      // đã sắp xếp created_at desc).
+      const seen = new Set<string>();
+      const reports: SavedReportItemDto[] = [];
+      for (const m of matches) {
         const rawScore = Number(m.match_score || 0);
         const finalScore =
           rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
@@ -260,15 +266,21 @@ export class RecommendationService {
           reportName = `Skill Gap Report — ${m.search_group || 'General Path'}`;
         }
 
-        return {
+        const dedupeKey = `${m.cv_id}|${m.match_type}|${reportName}`;
+        if (seen.has(dedupeKey)) continue;
+        seen.add(dedupeKey);
+
+        reports.push({
           match_id: m.match_id,
           report_name: reportName,
           match_type: m.match_type,
           match_score: finalScore,
           created_at: m.created_at,
           cv_id: m.cv_id,
-        };
-      });
+        });
+      }
+
+      return reports;
     } catch (error: unknown) {
       this.handleError(error, 'Get Saved Reports List');
       throw new BadRequestException('Could not fetch saved reports history');

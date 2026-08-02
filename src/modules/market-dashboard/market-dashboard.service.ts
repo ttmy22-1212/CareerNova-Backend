@@ -28,7 +28,6 @@ export class MarketDashboardService {
     { label: 'Hợp đồng', value: 'contract' },
     { label: 'Thực tập', value: 'internship' },
     { label: 'Làm từ xa', value: 'remote' },
-    { label: 'Linh hoạt', value: 'hybrid' },
   ];
 
   constructor(private readonly prisma: PrismaService) {}
