@@ -112,9 +112,8 @@ export class LearningRoadmapService {
         userId,
       );
 
-      if (!filters.skill) {
-        learning_paths = learning_paths.slice(0, normalizedLimit);
-      }
+      // Luôn áp limit để tham số nhất quán (trước đây bị bỏ qua khi có skill).
+      learning_paths = learning_paths.slice(0, normalizedLimit);
 
       return { learning_paths, recommended_courses };
     } catch (error: unknown) {
