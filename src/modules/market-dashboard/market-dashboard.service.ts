@@ -866,10 +866,18 @@ export class MarketDashboardService {
       // 6. Trưởng thành xếp theo % tăng trưởng, mới nổi xếp theo số tin hiện tại.
       //    Gộp một danh sách Top 6, dành sẵn tối đa RESERVED_FOR_NEW chỗ cho kỹ năng
       //    mới nổi (để chúng vẫn xuất hiện dù nhóm trưởng thành đủ 6). [cite: 240]
+      // Tiêu chí phụ (số tin, rồi skill_id) để thứ tự ỔN ĐỊNH khi bằng điểm,
+      // tránh danh sách đảo chỗ ngẫu nhiên mỗi lần tải.
       established.sort(
-        (a, b) => (b.growth_percentage ?? 0) - (a.growth_percentage ?? 0),
+        (a, b) =>
+          (b.growth_percentage ?? 0) - (a.growth_percentage ?? 0) ||
+          b.job_count_current - a.job_count_current ||
+          a.skill_id - b.skill_id,
       );
-      emerging.sort((a, b) => b.job_count_current - a.job_count_current);
+      emerging.sort(
+        (a, b) =>
+          b.job_count_current - a.job_count_current || a.skill_id - b.skill_id,
+      );
 
       const TOP_N = 6;
       const RESERVED_FOR_NEW = 2;
