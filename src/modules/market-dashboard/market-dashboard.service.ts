@@ -824,30 +824,33 @@ export class MarketDashboardService {
       }
 
       // 5. Tính toán Tỷ lệ tăng trưởng kết hợp 2 kỳ [cite: 238, 239]
+      // Chỉ xét các kỹ năng có đủ mẫu ở kỳ trước (countB >= MIN_PREV_COUNT).
+      // Tránh chia cho 0 / mẫu quá nhỏ tạo ra % tăng trưởng ảo bị phóng đại
+      // (ví dụ kỳ trước = 0 tin sẽ cho ra những con số như 1600%).
+      const MIN_PREV_COUNT = 5;
+
       const calculatedSkills: RisingSkillItemDto[] = Array.from(
         currentSkillMap.entries(),
-      ).map(([id, data]) => {
-        const countA = data.countA;
-        const countB = prevCountMap.get(id) || 0;
+      )
+        .filter(([id]) => (prevCountMap.get(id) || 0) >= MIN_PREV_COUNT)
+        .map(([id, data]) => {
+          const countA = data.countA;
+          const countB = prevCountMap.get(id) || 0;
 
-        let growthRate = 0;
-        if (countB > 0) {
-          growthRate = ((countA - countB) / countB) * 100;
-        } else {
-          growthRate = countA * 100; // Quy ước tăng trưởng nhảy vọt nếu kỳ trước chưa có post nào
-        }
+          // countB >= MIN_PREV_COUNT (> 0) nên luôn dùng công thức phần trăm chuẩn
+          const growthRate = ((countA - countB) / countB) * 100;
 
-        return {
-          skill_id: id,
-          skill_name: data.name,
-          job_count_current: countA,
-          avg_salary:
-            data.salaryCount > 0
-              ? Math.round(data.totalSalary / data.salaryCount)
-              : 0,
-          growth_percentage: Number(growthRate.toFixed(1)),
-        };
-      });
+          return {
+            skill_id: id,
+            skill_name: data.name,
+            job_count_current: countA,
+            avg_salary:
+              data.salaryCount > 0
+                ? Math.round(data.totalSalary / data.salaryCount)
+                : 0,
+            growth_percentage: Number(growthRate.toFixed(1)),
+          };
+        });
 
       // 6. Sắp xếp giảm dần theo % tăng trưởng và bốc ra Top 6 [cite: 240]
       return calculatedSkills
