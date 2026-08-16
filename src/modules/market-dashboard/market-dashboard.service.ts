@@ -824,38 +824,69 @@ export class MarketDashboardService {
       }
 
       // 5. Tính toán Tỷ lệ tăng trưởng kết hợp 2 kỳ [cite: 238, 239]
-      // Chỉ xét các kỹ năng có đủ mẫu ở kỳ trước (countB >= MIN_PREV_COUNT).
-      // Tránh chia cho 0 / mẫu quá nhỏ tạo ra % tăng trưởng ảo bị phóng đại
-      // (ví dụ kỳ trước = 0 tin sẽ cho ra những con số như 1600%).
-      const MIN_PREV_COUNT = 5;
+      // - Kỹ năng "trưởng thành" (countB >= MIN_PREV_COUNT): tính % tăng trưởng chuẩn.
+      // - Kỹ năng "mới nổi" (kỳ trước chưa đủ mẫu, đủ tin kỳ này): gắn tag is_new
+      //   + growth = null thay vì bịa ra % ảo bị phóng đại (trước đây countA*100 → 1600%).
+      const MIN_PREV_COUNT = 5; // ngưỡng mẫu tối thiểu kỳ trước để tính %
+      const MIN_NEW_COUNT = 5; // ngưỡng tin kỳ này để coi là "mới nổi" (lọc nhiễu)
 
-      const calculatedSkills: RisingSkillItemDto[] = Array.from(
-        currentSkillMap.entries(),
-      )
-        .filter(([id]) => (prevCountMap.get(id) || 0) >= MIN_PREV_COUNT)
-        .map(([id, data]) => {
-          const countA = data.countA;
-          const countB = prevCountMap.get(id) || 0;
+      const established: RisingSkillItemDto[] = [];
+      const emerging: RisingSkillItemDto[] = [];
 
-          // countB >= MIN_PREV_COUNT (> 0) nên luôn dùng công thức phần trăm chuẩn
+      for (const [id, data] of currentSkillMap.entries()) {
+        const countA = data.countA;
+        const countB = prevCountMap.get(id) || 0;
+        const avgSalary =
+          data.salaryCount > 0
+            ? Math.round(data.totalSalary / data.salaryCount)
+            : 0;
+
+        if (countB >= MIN_PREV_COUNT) {
           const growthRate = ((countA - countB) / countB) * 100;
-
-          return {
+          established.push({
             skill_id: id,
             skill_name: data.name,
             job_count_current: countA,
-            avg_salary:
-              data.salaryCount > 0
-                ? Math.round(data.totalSalary / data.salaryCount)
-                : 0,
+            avg_salary: avgSalary,
             growth_percentage: Number(growthRate.toFixed(1)),
-          };
-        });
+            is_new: false,
+          });
+        } else if (countA >= MIN_NEW_COUNT) {
+          emerging.push({
+            skill_id: id,
+            skill_name: data.name,
+            job_count_current: countA,
+            avg_salary: avgSalary,
+            growth_percentage: null, // không quy ra % ảo, hiển thị tag "Mới"
+            is_new: true,
+          });
+        }
+      }
 
-      // 6. Sắp xếp giảm dần theo % tăng trưởng và bốc ra Top 6 [cite: 240]
-      return calculatedSkills
-        .sort((a, b) => b.growth_percentage - a.growth_percentage)
-        .slice(0, 6);
+      // 6. Trưởng thành xếp theo % tăng trưởng, mới nổi xếp theo số tin hiện tại.
+      //    Gộp một danh sách Top 6, dành sẵn tối đa RESERVED_FOR_NEW chỗ cho kỹ năng
+      //    mới nổi (để chúng vẫn xuất hiện dù nhóm trưởng thành đủ 6). [cite: 240]
+      established.sort(
+        (a, b) => (b.growth_percentage ?? 0) - (a.growth_percentage ?? 0),
+      );
+      emerging.sort((a, b) => b.job_count_current - a.job_count_current);
+
+      const TOP_N = 6;
+      const RESERVED_FOR_NEW = 2;
+      const emergingPick = emerging.slice(0, RESERVED_FOR_NEW);
+      const establishedPick = established.slice(0, TOP_N - emergingPick.length);
+      const result = [...establishedPick, ...emergingPick];
+
+      // Nếu chưa đủ Top 6, lấp nốt bằng phần còn lại của cả hai nhóm.
+      if (result.length < TOP_N) {
+        const rest = [
+          ...established.slice(establishedPick.length),
+          ...emerging.slice(emergingPick.length),
+        ];
+        result.push(...rest.slice(0, TOP_N - result.length));
+      }
+
+      return result;
     } catch (error: unknown) {
       this.handleError(error, 'Rising Skills');
       throw new BadRequestException(
